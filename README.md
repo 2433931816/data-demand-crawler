@@ -1,25 +1,72 @@
-# 数据需求自动采集与可视化系统
+# 📊 数据需求自动采集与可视化系统
 
-## 项目简介
-本项目实现了对**尚数网、北京国际大数据交易所、上海数据交易所、广州数据交易所**数据需求的每日自动抓取、清洗、存储与可视化展示。
+> 多源数据需求的每日自动抓取、清洗、存储与可视化展示
 
-## 功能模块
-- **数据抓取**：定时抓取4个平台的数据需求（工作日10:00自动执行）
-- **数据清洗**：自动去重、字段修复、HTML标签清理、分类映射
-- **数据存储**：SQLite数据库 + CSV导出（全量/拆分/增量）
-- **可视化看板**：Flask + ECharts 构建，支持筛选、导出、趋势分析
+---
 
-## 技术栈
-Python · Requests · BeautifulSoup · Pandas · SQLite · Flask · ECharts
+## 🎯 项目简介
 
-## 快速运行
+本项目实现了对 **尚数网、北京国际大数据交易所、上海数据交易所、广州数据交易所** 四个平台数据需求的每日自动抓取、清洗、存储与可视化展示。
+
+系统每天定时运行，自动产出干净的增量数据，并通过交互式看板直观展示需求趋势与来源分布。
+
+---
+
+## ✨ 功能特性
+
+- **自动抓取**：工作日 10:00 定时运行，支持 4 个数据源
+- **数据清洗**：自动去重、字段修复、HTML 标签清理、分类映射
+- **数据存储**：SQLite 数据库 + CSV 导出（全量 / 拆分 / 增量）
+- **可视化看板**：Flask + ECharts 实现，支持日期 / 来源筛选、数据导出
+- **安全加固**：敏感信息通过环境变量管理，不写入代码
+- **日志轮转**：自动切割日志，单文件 5MB，保留 5 个备份
+
+---
+
+## 🛠️ 技术栈
+
+| 类别 | 技术 |
+|------|------|
+| 爬虫 | Python · Requests · BeautifulSoup |
+| 数据处理 | Pandas · SQLite · 正则表达式 |
+| 定时调度 | schedule |
+| 可视化 | Flask · ECharts |
+| 日志 | RotatingFileHandler |
+| 版本控制 | Git · GitHub |
+
+---
+
+## 📊 数据来源
+
+| 数据源 | 状态 | 说明 |
+|--------|------|------|
+| 尚数网 | ✅ 已接入 | 公开 API，无需登录 |
+| 北京国际大数据交易所 | ✅ 已接入 | 需登录 + Cookie |
+| 上海数据交易所 | ✅ 已接入 | 需登录 + Cookie |
+| 广州数据交易所 | ✅ 已接入 | 需登录 + Token |
+
+---
+
+## 📊 看板预览
+
+### 总览卡片
+
+![总览](screenshots/overview.png)
+
+### 每日新增趋势
+
+![趋势](screenshots/trend.png)
+
+### 来源分布
+
+![来源分布](screenshots/source_distribution.png)
+
+---
+
+## 🚀 快速运行
+
+### 1. 克隆项目
+
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动爬虫调度（定时任务）
-python scheduler.py
-
-# 启动看板
-python app.pygit mv README README.md
-git add README.md
+git clone https://github.com/2433931816/data-demand-crawler.git
+cd data-demand-crawler
