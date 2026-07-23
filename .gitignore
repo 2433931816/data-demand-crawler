@@ -1,0 +1,39 @@
+         # Virtual Environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database files
+*.db
+*.db.backup_*
+*.db-*
+
+# Data files (CSV)
+data_demands/
+data_demands_clean/
+data_demands_clean_split/
+data_demands_daily/
+*.csv
+
+# Logs
+logs/
+*.log
+
+# IDE configuration
+.idea/
+.vscode/
+*.swp
+
+# Environment variables
+.env
+.env.local
+
+# OS generated files
+.DS_Store
+Thumbs.db

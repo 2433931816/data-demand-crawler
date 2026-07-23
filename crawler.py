@@ -9,6 +9,10 @@ from datetime import datetime
 from typing import List, Dict
 import os
 import html
+from dotenv import load_dotenv
+
+# ======================== 加载环境变量 ========================
+load_dotenv()
 
 # ======================== 日志配置 ========================
 logging.basicConfig(
@@ -178,7 +182,7 @@ class ShangshuwangCrawler:
                     'source': '尚数网',
                     'title': title,
                     'description': clean,
-                    'publish_date': item.get('publish_time', '') or item.get('publishTime', ''),  # ← 改这里
+                    'publish_date': item.get('publish_time', '') or item.get('publishTime', ''),
                     'url': item.get('firstUrl') or f"https://shangshuwang.cn/demand/{item.get('id', '')}",
                     'category': item.get('app_range', ''),
                 }
@@ -188,7 +192,7 @@ class ShangshuwangCrawler:
             logger.error(f"尚数网第 {page_number} 页失败: {e}")
         return demands
 
-    # ---------- 数据源：北京国际大数据交易所（需Cookie） ----------
+    # ---------- 数据源：北京国际大数据交易所（需Cookie，从环境变量读取） ----------
     def fetch_beijing(self) -> List[Dict]:
         all_demands = []
         page = 1
@@ -197,8 +201,7 @@ class ShangshuwangCrawler:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.bjidex.com/",
             "Origin": "https://www.bjidex.com",
-            # ⚠️ 请替换为你的真实Cookie
-            "Cookie": "Hm_lvt_b7cf45c70d25b46632335bfbff44b232=1784164702,1784169421,1784276769,1784540215; Hm_lpvt_b7cf45c70d25b46632335bfbff44b232=1784540215; HMACCOUNT=8D715CE2D540A3D2",
+            "Cookie": os.getenv('COOKIE_BEIJING', ''),
         }
         while True:
             try:
@@ -239,7 +242,7 @@ class ShangshuwangCrawler:
         logger.info(f"北京数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
-    # ---------- 数据源：上海数据交易所（需Cookie） ----------
+    # ---------- 数据源：上海数据交易所（需Cookie，从环境变量读取） ----------
     def fetch_shanghai(self) -> List[Dict]:
         all_demands = []
         page = 1
@@ -248,8 +251,7 @@ class ShangshuwangCrawler:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://nidts.chinadep.com/",
             "Origin": "https://nidts.chinadep.com",
-            # ⚠️ 请替换为你的真实Cookie
-            "Cookie": "_pk_id.2.510f=829638e00c03d5af.1784171483.; Hm_lvt_4a6e6878538254a2578d9f3c5f43a81c=1784170605,1784508734,1784537704; HMACCOUNT=8D715CE2D540A3D2; Hm_lvt_2cb80b358657a75381c1f55355f48278=1784171483,1784508754,1784537714; _pk_ses.2.510f=1; Hm_lpvt_4a6e6878538254a2578d9f3c5f43a81c=1784540401; Hm_lpvt_2cb80b358657a75381c1f55355f48278=1784540406",
+            "Cookie": os.getenv('COOKIE_SHANGHAI', ''),
         }
         while True:
             try:
@@ -269,7 +271,6 @@ class ShangshuwangCrawler:
                     total = data.get('data', {}).get('total', 0)
                     logger.info(f"上海数交所共 {total} 条商品")
                 for item in items:
-                    # 使用正确的字段名
                     title = item.get('dataName', '无标题')
                     description = item.get('dataContent', '')
                     supplier = item.get('supplierCompanyName', '')
@@ -282,7 +283,6 @@ class ShangshuwangCrawler:
                         'publish_date': publish_date,
                         'url': f"https://nidts.chinadep.com/product/{item.get('id', '')}",
                         'category': item.get('dataType', ''),
-                        # 额外字段：供应商（可存到 raw_data 或单独字段）
                         'supplier': supplier,
                     }
                     all_demands.append(demand)
@@ -296,6 +296,7 @@ class ShangshuwangCrawler:
         logger.info(f"上海数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
+    # ---------- 数据源：广州数据交易所（需Cookie + Access-Token，从环境变量读取） ----------
     def fetch_guangzhou(self) -> List[Dict]:
         """抓取广州数据交易所的需求列表"""
         all_demands = []
@@ -307,8 +308,8 @@ class ShangshuwangCrawler:
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
             "Referer": "https://www.cantonde.com/",
-            "Access-Token": "dGVtcC00MEQwOEUzMjJBNjAwODA2ODc4N0UxRDFBNDFBOkZFN18yMDI2MDcyMjA5MTcxNV9mOGY3YTYxzGNiZTM0M2IzYjA0MWM1NWU0Ztc2ODA4NQ==",
-            "Cookie": "JSESSIONID=40D08E322A6008068787E1D1A41ABFE7; atoken=dGVtcC00MEQwOEUzMjJBNjAwODA2ODc4N0UxRDFBNDFBOkZFN18yMDI2MDcyMjA5MTcxNV9mOGY3YTYxzGNiZTM0M2IzYjA0MWM1NWU0Ztc2ODA4NQ==; navStat=xqdt",
+            "Access-Token": os.getenv('ACCESS_TOKEN_GUANGZHOU', ''),
+            "Cookie": os.getenv('COOKIE_GUANGZHOU', ''),
         }
 
         while True:
@@ -332,10 +333,8 @@ class ShangshuwangCrawler:
                 )
                 data = response.json()
 
-                # 从返回的数据中提取列表
                 items = data.get('data', [])
                 if not items:
-                    # 如果 data 是字典，尝试提取
                     for key in ['list', 'records', 'rows']:
                         if key in data.get('data', {}):
                             items = data['data'][key]
@@ -345,7 +344,6 @@ class ShangshuwangCrawler:
                     break
 
                 for item in items:
-                    # 发布日期格式：20260622 -> 2026-06-22
                     raw_date = str(item.get('FBRQ', ''))
                     if len(raw_date) == 8:
                         publish_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
@@ -359,10 +357,10 @@ class ShangshuwangCrawler:
                         'publish_date': publish_date,
                         'url': f"https://www.cantonde.com/demand/{item.get('ID', '')}",
                         'category': item.get('XQLX_NOTE', ''),
-                        'budget': item.get('CGYS', ''),  # 预算
-                        'scene': item.get('YYCJ_NOTE', ''),  # 应用场景
-                        'status': item.get('ZT_NOTE', ''),  # 状态
-                        'tags': item.get('XQBQ', ''),  # 标签
+                        'budget': item.get('CGYS', ''),
+                        'scene': item.get('YYCJ_NOTE', ''),
+                        'status': item.get('ZT_NOTE', ''),
+                        'tags': item.get('XQBQ', ''),
                     }
                     all_demands.append(demand)
 
@@ -374,6 +372,7 @@ class ShangshuwangCrawler:
                 break
 
         return all_demands
+
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []

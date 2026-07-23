@@ -6,12 +6,15 @@ import logging
 import requests
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from dotenv import load_dotenv
 from crawler import ShangshuwangCrawler
 from clean_data import clean_and_export_daily
 
+load_dotenv()
+
 # ========== 配置 ==========
-# 企业微信机器人 Webhook（请替换为你自己的）
-WECHAT_WEBHOOK_URL = " "
+# 企业微信机器人 Webhook（从环境变量读取）
+WECHAT_WEBHOOK_URL = os.getenv('WECHAT_WEBHOOK_URL', '')
 
 # ========== 创建日志目录 ==========
 LOG_DIR = './logs'
@@ -30,7 +33,7 @@ console_handler.setLevel(logging.INFO)
 # 文件输出（轮转：单文件5MB，保留5个备份）
 file_handler = RotatingFileHandler(
     log_file,
-    maxBytes=5 * 1024 * 1024,  # 5MB
+    maxBytes=5 * 1024 * 1024,
     backupCount=5,
     encoding='utf-8'
 )
@@ -48,8 +51,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # ========== 企业微信告警函数 ==========
 def send_wechat_alert(message: str):
-    """发送告警消息到企业微信群"""
-    if not WECHAT_WEBHOOK_URL or "你的key" in WECHAT_WEBHOOK_URL:
+    if not WECHAT_WEBHOOK_URL:
         logger.warning("企业微信 Webhook 未配置，跳过告警")
         return
     try:
@@ -67,7 +69,6 @@ def send_wechat_alert(message: str):
 
 # ========== 定时任务函数 ==========
 def job():
-    # 周末跳过
     if datetime.now().weekday() >= 5:
         logger.info("今天是周末，不执行抓取任务")
         return
@@ -91,11 +92,6 @@ def job():
     finally:
         crawler.close()
 
-    # 如果有错误但未发送告警（例如之前的异常已被捕获但未发送），可在此兜底
-    if error_occurred:
-        # 已发送，无需重复
-        pass
-
     logger.info("===== 定时任务执行完毕 =====")
 
 # ========== 设置定时计划 ==========
@@ -104,7 +100,6 @@ schedule.every().day.at("10:00").do(job)
 logger.info(f"定时任务已启动，工作日 10:00 自动抓取（周末跳过）。日志文件: {log_file}")
 logger.info("按 Ctrl+C 可停止。")
 
-# ========== 循环执行 ==========
 while True:
     schedule.run_pending()
     time.sleep(60)
