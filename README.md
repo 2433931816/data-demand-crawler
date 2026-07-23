@@ -61,6 +61,11 @@
 
 ![来源分布](screenshots/source_distribution.png)
 
+### 今日新增需求列表
+
+![今日新增列表](screenshots/daily_list.png)
+
+> 注：截图当日无新增需求，不代表系统异常。
 ---
 
 ## 🚀 快速运行
