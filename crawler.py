@@ -5,6 +5,8 @@ import hashlib
 import logging
 import pandas as pd
 import re
+import time
+from functools import wraps
 from datetime import datetime
 from typing import List, Dict
 import os
@@ -22,6 +24,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ======================== 重试装饰器 ========================
+def retry_on_error(max_retries=3, delay=2, backoff=2, exceptions=(Exception,)):
+    """
+    自动重试装饰器
+    :param max_retries: 最大重试次数
+    :param delay: 初始延迟（秒）
+    :param backoff: 延迟倍增因子
+    :param exceptions: 需要捕获的异常类型
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            _delay = delay
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    if attempt == max_retries:
+                        logger.error(f"函数 {func.__name__} 重试 {max_retries} 次后仍失败: {e}")
+                        raise
+                    logger.warning(f"函数 {func.__name__} 第 {attempt+1} 次尝试失败: {e}，{_delay}秒后重试...")
+                    time.sleep(_delay)
+                    _delay *= backoff
+            return None
+        return wrapper
+    return decorator
+
 # ======================== 清洗辅助函数 ========================
 def clean_html(raw: str) -> str:
     """去除HTML标签，提取纯文本"""
@@ -29,7 +58,6 @@ def clean_html(raw: str) -> str:
         return ''
     try:
         text = html.unescape(raw)
-        # 简单正则删除标签（不依赖 BeautifulSoup，减少依赖）
         text = re.sub(r'<[^>]+>', '', text)
         text = re.sub(r'\s+', ' ', text).strip()
         return text
@@ -82,11 +110,9 @@ class ShangshuwangCrawler:
                 demand['title'],
                 demand.get('publish_date', '')
             )
-            # 先查询该记录是否存在
             self.cursor.execute("SELECT created_at FROM demands WHERE id = ?", (demand_id,))
             existing = self.cursor.fetchone()
             if existing:
-                # 存在：保留原来的 created_at，只更新其他字段
                 created_at = existing[0]
                 self.cursor.execute('''
                     UPDATE demands SET
@@ -111,7 +137,6 @@ class ShangshuwangCrawler:
                     demand_id
                 ))
             else:
-                # 不存在：插入新记录，设置 created_at = now
                 self.cursor.execute('''
                     INSERT INTO demands
                     (id, source, title, description, category, publish_date, url, raw_data, created_at, updated_at)
@@ -151,6 +176,7 @@ class ShangshuwangCrawler:
             logger.info(f"数据已导出至（备用）: {alt_path}")
 
     # ---------- 数据源：尚数网（公开，无需Cookie） ----------
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_shangshuwang(self, max_pages: int = 1) -> List[Dict]:
         all_demands = []
         for page in range(1, max_pages + 1):
@@ -166,15 +192,11 @@ class ShangshuwangCrawler:
         try:
             url = f"https://api.shangshuwang.cn/m/getSampleList/new?pageSize=10&pageNumber={page_number}&selectType=188&useType=188"
             response = self.session.get(url, timeout=30)
-            if response.status_code != 200:
-                logger.error(f"尚数网请求失败，状态码: {response.status_code}")
-                return demands
+            response.raise_for_status()
             data = response.json()
             if data.get('code') != 200:
                 return demands
             items = data.get('data', [])
-            if not items:
-                return demands
             for item in items:
                 intro = item.get('sample_intro', '')
                 clean = clean_html(intro)
@@ -189,11 +211,16 @@ class ShangshuwangCrawler:
                 }
                 demands.append(demand)
             logger.info(f"尚数网第 {page_number} 页抓取 {len(demands)} 条")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"尚数网第 {page_number} 页请求异常: {e}")
+            raise
         except Exception as e:
             logger.error(f"尚数网第 {page_number} 页失败: {e}")
+            raise
         return demands
 
-    # ---------- 数据源：北京国际大数据交易所（需Cookie，从环境变量读取） ----------
+    # ---------- 数据源：北京国际大数据交易所 ----------
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_beijing(self) -> List[Dict]:
         all_demands = []
         page = 1
@@ -208,9 +235,7 @@ class ShangshuwangCrawler:
             try:
                 url = f"https://mix.bjidex.com/oper-api/packet/officialList?demandTitle=&page={page}&size={page_size}"
                 response = self.session.get(url, headers=headers, timeout=30)
-                if response.status_code != 200:
-                    logger.error(f"北京数交所请求失败: {response.status_code}")
-                    break
+                response.raise_for_status()
                 data = response.json()
                 if data.get('code') != 200:
                     logger.error(f"北京数交所 API 错误: {data.get('msg')}")
@@ -237,13 +262,17 @@ class ShangshuwangCrawler:
                 if len(rows) < page_size:
                     break
                 page += 1
+            except requests.exceptions.RequestException as e:
+                logger.error(f"北京数交所第 {page} 页请求异常: {e}")
+                raise
             except Exception as e:
-                logger.error(f"北京数交所抓取第 {page} 页失败: {e}")
-                break
+                logger.error(f"北京数交所第 {page} 页失败: {e}")
+                raise
         logger.info(f"北京数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
-    # ---------- 数据源：上海数据交易所（需Cookie，从环境变量读取） ----------
+    # ---------- 数据源：上海数据交易所 ----------
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_shanghai(self) -> List[Dict]:
         all_demands = []
         page = 1
@@ -258,9 +287,7 @@ class ShangshuwangCrawler:
             try:
                 url = f"https://nidts.chinadep.com/daep/broker/product/visitor/pageProduct?pageSize={page_size}&pageNum={page}"
                 response = self.session.get(url, headers=headers, timeout=30)
-                if response.status_code != 200:
-                    logger.error(f"上海数交所请求失败: {response.status_code}")
-                    break
+                response.raise_for_status()
                 data = response.json()
                 if data.get('code') != 200:
                     logger.error(f"上海数交所 API 错误: {data.get('message')}")
@@ -272,38 +299,35 @@ class ShangshuwangCrawler:
                     total = data.get('data', {}).get('total', 0)
                     logger.info(f"上海数交所共 {total} 条商品")
                 for item in items:
-                    title = item.get('dataName', '无标题')
-                    description = item.get('dataContent', '')
-                    supplier = item.get('supplierCompanyName', '')
-                    publish_date = item.get('supplierProductReleaseTime', '')
-
                     demand = {
                         'source': '上海数据交易所',
-                        'title': title,
-                        'description': description,
-                        'publish_date': publish_date,
+                        'title': item.get('dataName', '无标题'),
+                        'description': item.get('dataContent', ''),
+                        'publish_date': item.get('supplierProductReleaseTime', ''),
                         'url': f"https://nidts.chinadep.com/product/{item.get('id', '')}",
                         'category': item.get('dataType', ''),
-                        'supplier': supplier,
+                        'supplier': item.get('supplierCompanyName', ''),
                     }
                     all_demands.append(demand)
                 logger.info(f"上海数交所第 {page} 页抓取 {len(items)} 条")
                 if len(items) < page_size:
                     break
                 page += 1
+            except requests.exceptions.RequestException as e:
+                logger.error(f"上海数交所第 {page} 页请求异常: {e}")
+                raise
             except Exception as e:
-                logger.error(f"上海数交所抓取第 {page} 页失败: {e}")
-                break
+                logger.error(f"上海数交所第 {page} 页失败: {e}")
+                raise
         logger.info(f"上海数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
-    # ---------- 数据源：广州数据交易所（需Cookie + Access-Token，从环境变量读取） ----------
+    # ---------- 数据源：广州数据交易所 ----------
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_guangzhou(self) -> List[Dict]:
-        """抓取广州数据交易所的需求列表"""
         all_demands = []
         page_no = 1
         page_size = 20
-
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -312,7 +336,6 @@ class ShangshuwangCrawler:
             "Access-Token": os.getenv('ACCESS_TOKEN_GUANGZHOU', ''),
             "Cookie": os.getenv('COOKIE_GUANGZHOU', ''),
         }
-
         while True:
             try:
                 payload = {
@@ -332,25 +355,22 @@ class ShangshuwangCrawler:
                     json=payload,
                     timeout=30
                 )
+                response.raise_for_status()
                 data = response.json()
-
                 items = data.get('data', [])
                 if not items:
                     for key in ['list', 'records', 'rows']:
                         if key in data.get('data', {}):
                             items = data['data'][key]
                             break
-
                 if not items:
                     break
-
                 for item in items:
                     raw_date = str(item.get('FBRQ', ''))
                     if len(raw_date) == 8:
                         publish_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
                     else:
                         publish_date = ''
-
                     demand = {
                         'source': '广州数据交易所',
                         'title': item.get('XQZT', '无标题'),
@@ -364,22 +384,24 @@ class ShangshuwangCrawler:
                         'tags': item.get('XQBQ', ''),
                     }
                     all_demands.append(demand)
-
                 if len(items) < page_size:
                     break
                 page_no += 1
+            except requests.exceptions.RequestException as e:
+                logger.error(f"广州数交所第 {page_no} 页请求异常: {e}")
+                raise
             except Exception as e:
-                logger.error(f"广州数据交易所抓取失败: {e}")
-                break
-
+                logger.error(f"广州数交所第 {page_no} 页失败: {e}")
+                raise
+        logger.info(f"广州数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
+    # ---------- 数据源：杭州数据交易所 ----------
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_hangzhou(self) -> List[Dict]:
-        """抓取杭州数据交易所的需求列表（基于真实 cURL）"""
         all_demands = []
         page = 1
         page_size = 20
-
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
@@ -394,34 +416,24 @@ class ShangshuwangCrawler:
             "sec-ch-ua-platform": '"Android"',
             "Cookie": os.getenv('COOKIE_HANGZHOU', ''),
         }
-
         while True:
             try:
                 url = f"https://h5.hzdex.cn/api/demands/page?demandClassify=DATA_DEMAND&demandName=&page={page}&pageSize={page_size}"
                 response = self.session.get(url, headers=headers, timeout=30)
-
-                if response.status_code != 200:
-                    logger.error(f"杭州数交所请求失败: {response.status_code}")
-                    break
-
-                # 检查是否返回了 JSON
+                response.raise_for_status()
                 if not response.text.strip().startswith('{'):
                     logger.error(f"杭州数交所返回非 JSON 数据: {response.text[:100]}")
                     break
-
                 data = response.json()
                 if not data.get('success'):
                     logger.error(f"杭州数交所 API 错误: {data}")
                     break
-
                 items = data.get('data', {}).get('data', [])
                 if not items:
                     break
-
                 if page == 1:
                     total = data.get('data', {}).get('total', 0)
                     logger.info(f"杭州数交所共 {total} 条需求")
-
                 for item in items:
                     demand = {
                         'source': '杭州数据交易所',
@@ -432,28 +444,162 @@ class ShangshuwangCrawler:
                         'category': item.get('demandType', ''),
                     }
                     all_demands.append(demand)
-
                 logger.info(f"杭州数交所第 {page} 页抓取 {len(items)} 条")
+                if len(items) < page_size:
+                    break
+                page += 1
+            except requests.exceptions.RequestException as e:
+                logger.error(f"杭州数交所第 {page} 页请求异常: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"杭州数交所第 {page} 页失败: {e}")
+                raise
+        logger.info(f"杭州数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
+
+    # ---------- 数据源：深圳数据交易所（待审核通过后启用） ----------
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_shenzhen(self) -> List[Dict]:
+        all_demands = []
+        page = 1
+        page_size = 12
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Content-Type": "application/json",
+            "Referer": "https://www.szdex.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_SHENZHEN', ''),
+        }
+        while True:
+            try:
+                url = "https://www.szdex.com/dmall/v1.0/sjsp/spgl/pageQuerySjspList"
+                payload = {"page": page, "size": page_size}
+                response = self.session.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                if data.get('code') != 200:
+                    logger.error(f"深圳数交所 API 错误: {data.get('msg')}")
+                    break
+                items = data.get('data', {}).get('rows', [])
+                if not items:
+                    break
+                if page == 1:
+                    total = data.get('data', {}).get('totalCount', 0)
+                    logger.info(f"深圳数交所共 {total} 条商品")
+                for item in items:
+                    raw_time = item.get('cjsj', '')
+                    if raw_time:
+                        try:
+                            publish_date = datetime.fromtimestamp(int(raw_time) / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                        except:
+                            publish_date = ''
+                    else:
+                        publish_date = ''
+                    demand = {
+                        'source': '深圳数据交易所',
+                        'title': item.get('spMc', '无标题'),
+                        'description': item.get('spms', ''),
+                        'publish_date': publish_date,
+                        'url': f"https://www.szdex.com/product/{item.get('id', '')}",
+                        'category': item.get('spsjlxFlMc', ''),
+                        'supplier': item.get('fbfQyMc', ''),
+                        'price': item.get('xsjg', '面议'),
+                        'scene': item.get('yycjMcs', ''),
+                    }
+                    all_demands.append(demand)
+                logger.info(f"深圳数交所第 {page} 页抓取 {len(items)} 条")
+                if len(items) < page_size:
+                    break
+                page += 1
+            except requests.exceptions.RequestException as e:
+                logger.error(f"深圳数交所第 {page} 页请求异常: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"深圳数交所第 {page} 页失败: {e}")
+                raise
+        logger.info(f"深圳数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
+
+    def fetch_shandong(self) -> List[Dict]:
+        """抓取山东数据交易平台的需求列表"""
+        all_demands = []
+        page = 0
+        page_size = 9
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Referer": "https://www.sddep.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_SHANDONG', ''),
+        }
+
+        while True:
+            try:
+                url = f"https://www.sddep.com/server/website-manager/noauth/website25/demandList?page={page}&size={page_size}"
+                response = self.session.get(url, headers=headers, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"山东数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                # 兼容 status 为字符串或数字
+                if str(data.get('status')) != '200':
+                    logger.error(f"山东数交所 API 错误: {data.get('message')}")
+                    break
+
+                items = data.get('list', [])
+                if not items:
+                    break
+
+                if page == 0:
+                    logger.info(f"山东数交所第一页返回 {len(items)} 条")
+
+                for item in items:
+                    demand = {
+                        'source': '山东数据交易平台',
+                        'title': item.get('name', '无标题'),
+                        'description': item.get('resume', ''),
+                        'publish_date': item.get('gmtCreate', ''),
+                        'url': f"https://www.sddep.com/demand/{item.get('id', '')}",
+                        'category': '',  # 可后续映射 type 或 dataType
+                    }
+                    all_demands.append(demand)
+
+                logger.info(f"山东数交所第 {page + 1} 页抓取 {len(items)} 条")
 
                 if len(items) < page_size:
                     break
                 page += 1
 
             except Exception as e:
-                logger.error(f"杭州数交所抓取第 {page} 页失败: {e}")
+                logger.error(f"山东数交所抓取第 {page + 1} 页失败: {e}")
                 break
 
-        logger.info(f"杭州数交所总计抓取 {len(all_demands)} 条")
+        logger.info(f"山东数交所总计抓取 {len(all_demands)} 条")
         return all_demands
-
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
-        all_demands.extend(self.fetch_shangshuwang())
-        all_demands.extend(self.fetch_beijing())
-        all_demands.extend(self.fetch_shanghai())
-        all_demands.extend(self.fetch_guangzhou())
-        all_demands.extend(self.fetch_hangzhou())
+        fetch_functions = [
+            ('尚数网', self.fetch_shangshuwang),
+            ('北京数交所', self.fetch_beijing),
+            ('上海数交所', self.fetch_shanghai),
+            ('广州数交所', self.fetch_guangzhou),
+            ('杭州数交所', self.fetch_hangzhou),
+            # ('深圳数交所', self.fetch_shenzhen),  # 待审核通过后启用
+            ('山东数交所', self.fetch_shandong)
+        ]
+        for name, func in fetch_functions:
+            try:
+                logger.info(f"开始抓取 {name}...")
+                demands = func()
+                all_demands.extend(demands)
+                logger.info(f"{name} 抓取完成，共 {len(demands)} 条")
+            except Exception as e:
+                logger.error(f"{name} 抓取失败: {e}")
         if all_demands:
             self._save_demands(all_demands)
             self._export_csv()
