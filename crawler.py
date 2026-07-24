@@ -580,6 +580,72 @@ class ShangshuwangCrawler:
 
         logger.info(f"山东数交所总计抓取 {len(all_demands)} 条")
         return all_demands
+
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_hunan(self) -> List[Dict]:
+        """抓取湖南大数据交易所的数据产品列表"""
+        all_demands = []
+        page = 1
+        page_size = 50
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Authorization": "Bearer eyJ0eXAiOiJkVI1QiLCJhbGciOiJIUzI1NiJ9.eyJsb2dpblR5cGUiOiJsb2dpbilslmxVZ2luSWQiOiJzeXNFdXNlcjOyMDgwNTUxOTQyNTQyODM5ODEwliwicm5TdHliOiJIU0poZnlISXdidjIURE1jV3hIR09NakpHWUhGSUxvQylsnVzZXJJZCI6MjA4MDU1MTk0MjU0MjgzOTgxMH0.kQSAxdd4uqx14KHBh8VIFo2O4nsgg6M7TeZaDAw5qGU",
+            "Cookie": "Admin-Token=eyJ0eXAiOiJkVI1QiLCJhbGciOiJIUzI1NiJ9.eyJsb2dpblR5cGUiOiJsb2dpbilslmxVZ2luSWQiOiJzeXNFdXNlcjOyMDgwNTUxOTQyNTQyODM5ODEwliwicm5TdHliOiJIU0poZnlISXdidjIURE1jV3hIR09NakpHWUhGSUxvQylsnVzZXJJZCI6MjA4MDU1MTk0MjU0MjgzOTgxMH0.kQSAxdd4uqx14KHBh8VIFo2O4nsgg6M7TeZaDAw5qGU; zH_CN",
+            "Device-Type": "h5",
+            "Referer": "https://www.hunandex.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+
+        while True:
+            try:
+                url = f"https://trade.hunandex.com/prod-api/product/product/productData/list?pageNum={page}&pageSize={page_size}&isAsc=asc&orderByColumn=s.sort&name="
+                response = self.session.get(url, headers=headers, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"湖南数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('code') != 200:
+                    logger.error(f"湖南数交所 API 错误: {data.get('msg')}")
+                    break
+
+                items = data.get('data', {}).get('rows', [])
+                if not items:
+                    break
+
+                if page == 1:
+                    total = data.get('data', {}).get('total', 0)
+                    logger.info(f"湖南数交所共 {total} 条数据产品")
+
+                for item in items:
+                    demand = {
+                        'source': '湖南大数据交易所',
+                        'title': item.get('name', '无标题'),
+                        'description': item.get('productIntroduce', ''),
+                        'publish_date': item.get('releaseTime', ''),
+                        'url': f"https://www.hunandex.com/product/{item.get('id', '')}",
+                        'category': item.get('scenariosNames', '') or item.get('sectorName', ''),
+                        'supplier': item.get('supplierName', ''),
+                        'price': item.get('price', '面议'),
+                        'product_type': item.get('productType', ''),
+                    }
+                    all_demands.append(demand)
+
+                logger.info(f"湖南数交所第 {page} 页抓取 {len(items)} 条")
+
+                if len(items) < page_size:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"湖南数交所抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"湖南数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
@@ -590,7 +656,8 @@ class ShangshuwangCrawler:
             ('广州数交所', self.fetch_guangzhou),
             ('杭州数交所', self.fetch_hangzhou),
             # ('深圳数交所', self.fetch_shenzhen),  # 待审核通过后启用
-            ('山东数交所', self.fetch_shandong)
+            ('山东数交所', self.fetch_shandong),
+            ('湖南数交所', self.fetch_hunan)
         ]
         for name, func in fetch_functions:
             try:

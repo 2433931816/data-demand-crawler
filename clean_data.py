@@ -67,6 +67,22 @@ GUANGZHOU_CATEGORY_MAP = {
     # 后续发现新类型可在此添加
 }
 
+# ===== 新增：杭州数据交易所分类映射 =====
+HANGZHOU_CATEGORY_MAP = {
+    'DATA_DEMAND': '数据采购',
+    'DATA_SUPPLY': '数据供给',
+    'DATA_SERVICE': '数据服务',
+    'DATA_PRODUCT': '数据产品',
+    'DATA_TOOL': '数据工具',
+}
+
+# ===== 新增：深圳数据交易所分类映射（预置，待正式接入后生效） =====
+SHENZHEN_CATEGORY_MAP = {
+    '数据产品': '数据产品',
+    '数据服务': '数据服务',
+    '数据工具': '数据工具',
+}
+
 # ========== 企业微信告警函数 ==========
 def send_wechat_alert(message: str):
     if not WECHAT_WEBHOOK_URL or "你的key" in WECHAT_WEBHOOK_URL:
@@ -174,7 +190,7 @@ def check_data_quality(db_path='./demands.db'):
     logger.info(f"   - 空描述: {empty_desc} 条 ({empty_desc/total*100:.1f}%)")
     logger.info(f"   - 空URL: {empty_url} 条 ({empty_url/total*100:.1f}%)")
 
-    suspicious = df[df['title'].str.contains('无标题|测试|test|TBD', case=False, na=False)]
+    suspicious = df[df['title'].str.contains('无标题|测试|tests|TBD', case=False, na=False)]
     if not suspicious.empty:
         logger.info(f"\n⚠️ 可疑标题数量: {len(suspicious)} 条")
     else:
@@ -297,6 +313,14 @@ def _perform_cleaning(db_path='./demands.db'):
     # 广州
     df.loc[df['source'] == '广州数据交易所', 'category'] = df[df['source'] == '广州数据交易所']['category'].map(
         lambda x: GUANGZHOU_CATEGORY_MAP.get(x, x) if pd.notna(x) else x
+    )
+    # ===== 新增：杭州 =====
+    df.loc[df['source'] == '杭州数据交易所', 'category'] = df[df['source'] == '杭州数据交易所']['category'].map(
+        lambda x: HANGZHOU_CATEGORY_MAP.get(x, x) if pd.notna(x) else x
+    )
+    # ===== 新增：深圳（预置，待正式接入后生效） =====
+    df.loc[df['source'] == '深圳数据交易所', 'category'] = df[df['source'] == '深圳数据交易所']['category'].map(
+        lambda x: SHENZHEN_CATEGORY_MAP.get(x, x) if pd.notna(x) else x
     )
 
     for col in ['title', 'description']:
