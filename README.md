@@ -88,4 +88,4 @@
 
 ```bash
 git clone https://github.com/2433931816/data-demand-crawler.git
-cd data-demand-crawler
+cd data-demand-crawlergit status
