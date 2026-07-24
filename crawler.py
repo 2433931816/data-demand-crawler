@@ -375,57 +375,75 @@ class ShangshuwangCrawler:
         return all_demands
 
     def fetch_hangzhou(self) -> List[Dict]:
-        """抓取杭州数据交易所的需求列表（从HTML解析）"""
+        """抓取杭州数据交易所的需求列表（基于真实 cURL）"""
         all_demands = []
-        try:
-            url = "https://mall.hzdex.cn/requirement?tab=hall"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                # 从环境变量读取 Cookie（如果没有则留空）
-                "Cookie": os.getenv('COOKIE_HANGZHOU', ''),
-            }
-            response = self.session.get(url, headers=headers, timeout=30)
-            soup = BeautifulSoup(response.text, 'html.parser')
+        page = 1
+        page_size = 20
 
-            # 定位每个需求卡片（注意转义方括号）
-            items = soup.select(
-                'div.w-full.bg-white.flex-col.rounded-\\[16px\\].mt-\\[32px\\].p-\\[32px\\].cursor-pointer')
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Connection": "keep-alive",
+            "Referer": "https://h5.hzdex.cn/requirement?tab=hall",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36",
+            "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "Cookie": os.getenv('COOKIE_HANGZHOU', ''),
+        }
 
-            for item in items:
-                # 标题
-                title_elem = item.select_one(
-                    'div.font-\\[PingFangSC-SNaNpxibold\\].font-semibold.text-\\[28px\\].text-\\[#333333\\]')
-                title = title_elem.text.strip() if title_elem else '无标题'
+        while True:
+            try:
+                url = f"https://h5.hzdex.cn/api/demands/page?demandClassify=DATA_DEMAND&demandName=&page={page}&pageSize={page_size}"
+                response = self.session.get(url, headers=headers, timeout=30)
 
-                # 描述
-                desc_elem = item.select_one(
-                    'div.font-\\[PingFangSC-Regular\\].font-normal.text-\\[24px\\].text-\\[#999999\\]')
-                desc = desc_elem.text.strip() if desc_elem else ''
+                if response.status_code != 200:
+                    logger.error(f"杭州数交所请求失败: {response.status_code}")
+                    break
 
-                # 价格
-                price_elem = item.select_one(
-                    'div.font-\\[PingFangSC-SNaNpxibold\\].font-semibold.text-\\[28px\\].text-\\[#E30F11\\]')
-                price = price_elem.text.strip() if price_elem else '面议'
+                # 检查是否返回了 JSON
+                if not response.text.strip().startswith('{'):
+                    logger.error(f"杭州数交所返回非 JSON 数据: {response.text[:100]}")
+                    break
 
-                # 标签（数据需求/API/数据集等）
-                tag_elems = item.select('div.mr-3.min-w-\\[112px\\].h-\\[36px\\]')
-                tags = [tag.text.strip() for tag in tag_elems if tag.text.strip()]
-                category = ' / '.join(tags) if tags else ''
+                data = response.json()
+                if not data.get('success'):
+                    logger.error(f"杭州数交所 API 错误: {data}")
+                    break
 
-                demand = {
-                    'source': '杭州数据交易所',
-                    'title': title,
-                    'description': desc,
-                    'publish_date': '',
-                    'url': url,
-                    'category': category,
-                    'price': price,
-                }
-                all_demands.append(demand)
+                items = data.get('data', {}).get('data', [])
+                if not items:
+                    break
 
-            logger.info(f"杭州数交所抓取完成，发现 {len(all_demands)} 条需求")
-        except Exception as e:
-            logger.error(f"杭州数交所抓取失败: {e}")
+                if page == 1:
+                    total = data.get('data', {}).get('total', 0)
+                    logger.info(f"杭州数交所共 {total} 条需求")
+
+                for item in items:
+                    demand = {
+                        'source': '杭州数据交易所',
+                        'title': item.get('demandName', '无标题'),
+                        'description': item.get('desc', ''),
+                        'publish_date': item.get('createdAt', ''),
+                        'url': f"https://h5.hzdex.cn/demand/{item.get('id', '')}",
+                        'category': item.get('demandType', ''),
+                    }
+                    all_demands.append(demand)
+
+                logger.info(f"杭州数交所第 {page} 页抓取 {len(items)} 条")
+
+                if len(items) < page_size:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"杭州数交所抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"杭州数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
     # ---------- 统一调度 ----------
