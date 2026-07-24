@@ -10,6 +10,7 @@ from typing import List, Dict
 import os
 import html
 from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 
 # ======================== 加载环境变量 ========================
 load_dotenv()
@@ -373,6 +374,60 @@ class ShangshuwangCrawler:
 
         return all_demands
 
+    def fetch_hangzhou(self) -> List[Dict]:
+        """抓取杭州数据交易所的需求列表（从HTML解析）"""
+        all_demands = []
+        try:
+            url = "https://mall.hzdex.cn/requirement?tab=hall"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                # 从环境变量读取 Cookie（如果没有则留空）
+                "Cookie": os.getenv('COOKIE_HANGZHOU', ''),
+            }
+            response = self.session.get(url, headers=headers, timeout=30)
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # 定位每个需求卡片（注意转义方括号）
+            items = soup.select(
+                'div.w-full.bg-white.flex-col.rounded-\\[16px\\].mt-\\[32px\\].p-\\[32px\\].cursor-pointer')
+
+            for item in items:
+                # 标题
+                title_elem = item.select_one(
+                    'div.font-\\[PingFangSC-SNaNpxibold\\].font-semibold.text-\\[28px\\].text-\\[#333333\\]')
+                title = title_elem.text.strip() if title_elem else '无标题'
+
+                # 描述
+                desc_elem = item.select_one(
+                    'div.font-\\[PingFangSC-Regular\\].font-normal.text-\\[24px\\].text-\\[#999999\\]')
+                desc = desc_elem.text.strip() if desc_elem else ''
+
+                # 价格
+                price_elem = item.select_one(
+                    'div.font-\\[PingFangSC-SNaNpxibold\\].font-semibold.text-\\[28px\\].text-\\[#E30F11\\]')
+                price = price_elem.text.strip() if price_elem else '面议'
+
+                # 标签（数据需求/API/数据集等）
+                tag_elems = item.select('div.mr-3.min-w-\\[112px\\].h-\\[36px\\]')
+                tags = [tag.text.strip() for tag in tag_elems if tag.text.strip()]
+                category = ' / '.join(tags) if tags else ''
+
+                demand = {
+                    'source': '杭州数据交易所',
+                    'title': title,
+                    'description': desc,
+                    'publish_date': '',
+                    'url': url,
+                    'category': category,
+                    'price': price,
+                }
+                all_demands.append(demand)
+
+            logger.info(f"杭州数交所抓取完成，发现 {len(all_demands)} 条需求")
+        except Exception as e:
+            logger.error(f"杭州数交所抓取失败: {e}")
+        return all_demands
+
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
@@ -380,6 +435,7 @@ class ShangshuwangCrawler:
         all_demands.extend(self.fetch_beijing())
         all_demands.extend(self.fetch_shanghai())
         all_demands.extend(self.fetch_guangzhou())
+        all_demands.extend(self.fetch_hangzhou())
         if all_demands:
             self._save_demands(all_demands)
             self._export_csv()
