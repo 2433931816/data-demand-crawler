@@ -907,6 +907,173 @@ class ShangshuwangCrawler:
         logger.info(f"华东数交总计抓取 {len(all_demands)} 条（去重后）")
         return all_demands
 
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_fujian(self) -> List[Dict]:
+        """抓取福建大数据交易所的需求列表"""
+        all_demands = []
+        page = 1
+        page_size = 20
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Referer": "https://trade.fjbdtex.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_FUJIAN', ''),
+        }
+
+        while True:
+            try:
+                url = f"https://trade.fjbdtex.com/tywpt-api/api/data-portal-center/portal/hwDemand/list?pageNo={page}&pageSize={page_size}&dataScene=&demandScene=&industryInvolved=&sortType=1&sort="
+                response = self.session.get(url, headers=headers, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"福建数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('code') != 200:
+                    logger.error(f"福建数交所 API 错误: {data.get('msg')}")
+                    break
+
+                items = data.get('result', {}).get('records', [])
+                total = data.get('result', {}).get('total', 0)
+
+                if page == 1:
+                    if total == 0:
+                        logger.info("福建数交所需求广场当前无数据")
+                        break
+                    logger.info(f"福建数交所共 {total} 条需求")
+
+                if not items:
+                    break
+
+                for item in items:
+                    demand = {
+                        'source': '福建大数据交易所',
+                        'title': item.get('demandName', '无标题'),
+                        'description': item.get('demandDesc', ''),
+                        'publish_date': item.get('releaseTime', ''),
+                        'url': f"https://trade.fjbdtex.com/demand/{item.get('id', '')}",
+                        'category': item.get('demandScene', ''),
+                        'supplier': item.get('companyName', ''),
+                    }
+                    all_demands.append(demand)
+
+                logger.info(f"福建数交所第 {page} 页抓取 {len(items)} 条")
+
+                if len(items) < page_size:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"福建数交所抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"福建数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
+
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_anhui(self) -> List[Dict]:
+        """抓取安徽省数据交易所的需求列表"""
+        all_demands = []
+        seen_ids = set()
+        page = 1
+        page_size = 10
+        total_pages = None
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Content-Type": "application/json",
+            "Origin": "https://www.ahdexc.com",
+            "Referer": "https://www.ahdexc.com/businessHall",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_ANHUI', ''),
+        }
+
+        while True:
+            try:
+                url = "https://www.ahdexc.com/api/portal/business/getNeedList"
+                payload = {
+                    "order": "desc",
+                    "sidx": "create_time",
+                    "tags": [],
+                    "searchKey": "",
+                    "pageNum": page,
+                    "pageSize": page_size,
+                    "minBudget": "",
+                    "maxBudget": "",
+                }
+                response = self.session.post(url, headers=headers, json=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"安徽数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('code') != 0:
+                    logger.error(f"安徽数交所 API 错误: {data.get('msg')}")
+                    break
+
+                items = data.get('data', {}).get('list', [])
+
+                if page == 1:
+                    total = data.get('data', {}).get('total', 0)
+                    if total == 0:
+                        logger.warning("安徽数交所返回 total=0，无数据")
+                        break
+                    total_pages = data.get('data', {}).get('totalPage', 1)
+                    logger.info(f"安徽数交所共 {total} 条需求，共 {total_pages} 页")
+
+                if not items:
+                    break
+
+                added_count = 0
+                for item in items:
+                    demand_id = item.get('id', '')
+                    if demand_id in seen_ids:
+                        continue
+                    seen_ids.add(demand_id)
+
+                    tags = item.get('labelList', [])
+                    tags_str = ', '.join(tags) if tags else ''
+
+                    demand = {
+                        'source': '安徽省数据交易所',
+                        'title': item.get('needTitle', '无标题'),
+                        'description': item.get('needDescription', ''),
+                        'publish_date': item.get('launchDate', ''),
+                        'url': f"https://www.ahdexc.com/demand/{demand_id}",
+                        'category': '',
+                        'supplier': item.get('companyName', ''),
+                        'status': item.get('needStatusName', ''),
+                        'tags': tags_str,
+                        'views': item.get('pageViews', 0),
+                    }
+                    all_demands.append(demand)
+                    added_count += 1
+
+                logger.info(f"安徽数交所第 {page} 页抓取 {len(items)} 条，新增 {added_count} 条")
+
+                if added_count == 0:
+                    logger.info("后续页面无新增数据，停止抓取")
+                    break
+
+                if total_pages and page >= total_pages:
+                    break
+
+                if len(items) < page_size:
+                    break
+
+                page += 1
+
+            except Exception as e:
+                logger.error(f"安徽数交所抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"安徽数交所总计抓取 {len(all_demands)} 条（去重后）")
+        return all_demands
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
@@ -920,7 +1087,9 @@ class ShangshuwangCrawler:
             ('山东数交所', self.fetch_shandong),
             ('湖南数交所', self.fetch_hunan),
             ('郑州数交所', self.fetch_zhengzhou),
-            ('华东数交所', self.fetch_huadong)
+            ('华东数交所', self.fetch_huadong),
+            ('福建数交所', self.fetch_fujian),
+            ('安徽数交所', self.fetch_anhui)
 
         ]
         for name, func in fetch_functions:
