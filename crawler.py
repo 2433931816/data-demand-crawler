@@ -646,6 +646,267 @@ class ShangshuwangCrawler:
 
         logger.info(f"湖南数交所总计抓取 {len(all_demands)} 条")
         return all_demands
+
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_zhengzhou(self) -> List[Dict]:
+        """抓取郑州数据交易中心的需求列表"""
+        all_demands = []
+        seen_ids = set()
+        page = 0
+        page_size = 10
+        max_pages = 3  # 安全限制
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Content-Type": "application/json",
+            "Origin": "https://market.zzbdex.com",
+            "Referer": "https://market.zzbdex.com/demand",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_ZHENGZHOU', ''),
+        }
+
+        while page < max_pages:
+            try:
+                url = "https://market.zzbdex.com/data-deal-admin/demandInfo/queryDemandHallPage"
+                payload = {
+                    "current": page,
+                    "size": page_size,
+                }
+                response = self.session.post(url, headers=headers, json=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"郑州数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('code') != 0:
+                    logger.error(f"郑州数交所 API 错误: {data.get('msg')}")
+                    break
+
+                items = data.get('data', {}).get('records', [])
+
+                if page == 0:
+                    total = data.get('data', {}).get('total', 0)
+                    if total > 0:
+                        logger.info(f"郑州数交所共 {total} 条需求")
+
+                if not items:
+                    break
+
+                added_count = 0
+                for item in items:
+                    demand_id = item.get('demandId', '')
+                    if demand_id in seen_ids:
+                        continue
+                    seen_ids.add(demand_id)
+
+                    budget_start = item.get('demandBudgetStart', '')
+                    budget_end = item.get('demandBudgetEnd', '')
+                    budget = f"{budget_start} - {budget_end}" if (budget_start or budget_end) else '面议'
+
+                    demand = {
+                        'source': '郑州数据交易中心',
+                        'title': item.get('demandName', '无标题').replace('\n', ' '),
+                        'description': item.get('demandDescription', ''),
+                        'publish_date': item.get('releaseTime', ''),
+                        'url': f"https://market.zzbdex.com/demand/{demand_id}",
+                        'category': item.get('sceneName', ''),
+                        'supplier': item.get('demandCName', ''),
+                        'budget': budget,
+                        'contact': item.get('contacts', ''),
+                        'phone': item.get('contactsPhone', ''),
+                        'scene_desc': item.get('appScenariosDescription', ''),
+                    }
+                    all_demands.append(demand)
+                    added_count += 1
+
+                logger.info(f"郑州数交所第 {page + 1} 页抓取 {len(items)} 条，新增 {added_count} 条")
+
+                if added_count == 0 or len(items) < page_size:
+                    break
+
+                page += 1
+
+            except Exception as e:
+                logger.error(f"郑州数交所抓取第 {page + 1} 页失败: {e}")
+                break
+
+        logger.info(f"郑州数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
+
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_guiyang(self) -> List[Dict]:
+        """抓取贵阳大数据交易所的需求列表"""
+        all_demands = []
+        page = 1
+        page_size = 20  # 可尝试调整为 20 或 50，看接口是否支持
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Referer": "https://www.gzdex.com.cn/need/list",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_GUIYANG', ''),
+        }
+
+        while True:
+            try:
+                url = f"https://www.gzdex.com.cn/apaas/backmgt/demand/hall/list?page={page}&pageSize={page_size}&search=&order=-1&productType="
+                response = self.session.get(url, headers=headers, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"贵阳数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('success') != 1:
+                    logger.error(f"贵阳数交所 API 错误: {data.get('errMsg')}")
+                    break
+
+                items = data.get('data', {}).get('list', [])
+                if not items:
+                    break
+
+                if page == 1:
+                    logger.info(f"贵阳数交所当前页 {len(items)} 条")
+
+                for item in items:
+                    demand = {
+                        'source': '贵阳大数据交易所',
+                        'title': item.get('title', '无标题'),
+                        'description': item.get('describe', ''),
+                        'publish_date': item.get('releaseTimeStr', ''),
+                        'url': f"https://www.gzdex.com.cn/demand/{item.get('id', '')}",
+                        'category': item.get('productClassifyName', ''),
+                        'supplier': item.get('need', ''),
+                        'price': item.get('capitalBudget', '面议'),
+                    }
+                    all_demands.append(demand)
+
+                logger.info(f"贵阳数交所第 {page} 页抓取 {len(items)} 条")
+
+                if len(items) < page_size:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"贵阳数交所抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"贵阳数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
+
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_huadong(self) -> List[Dict]:
+        """抓取华东江苏大数据交易中心的需求列表"""
+        all_demands = []
+        seen_ids = set()
+        page = 1
+        page_size = 50
+        total_pages = None
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Origin": "http://www.hddatapay.com",
+            "Referer": "http://www.hddatapay.com/viewJsp/demand.jsp?v=12.8",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest",
+            "Cookie": os.getenv('COOKIE_HUADONG', ''),
+        }
+
+        while True:
+            try:
+                url = "http://www.hddatapay.com/api/demandInfoList"
+                payload = {
+                    "pageNum": page,
+                    "pageSize": page_size,
+                }
+                response = self.session.post(url, headers=headers, data=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"华东数交请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('code') != '0':
+                    logger.error(f"华东数交 API 错误: {data.get('msg')}")
+                    break
+
+                items = data.get('data', {}).get('demandInfoCellDtoList', [])
+
+                # 第一页获取总数并计算总页数
+                if page == 1:
+                    total = data.get('data', {}).get('total', 0)
+                    if total == 0:
+                        logger.warning("华东数交返回 total=0，无数据")
+                        break
+                    total_pages = (total + page_size - 1) // page_size
+                    logger.info(f"华东数交共 {total} 条需求，共 {total_pages} 页")
+
+                # 如果当前页没有数据，停止
+                if not items:
+                    break
+
+                # 解析并去重
+                added_count = 0
+                for item in items:
+                    demand_id = item.get('id', '')
+                    if demand_id in seen_ids:
+                        continue
+                    seen_ids.add(demand_id)
+
+                    raw_time = item.get('issueTime', '')
+                    if raw_time:
+                        try:
+                            publish_date = datetime.fromtimestamp(int(raw_time) / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                        except:
+                            publish_date = ''
+                    else:
+                        publish_date = ''
+
+                    demand = {
+                        'source': '华东江苏大数据交易中心',
+                        'title': item.get('demandName', '无标题'),
+                        'description': item.get('info', ''),
+                        'publish_date': publish_date,
+                        'url': f"http://www.hddatapay.com/demand/{demand_id}",
+                        'category': item.get('scene', ''),
+                        'supplier': item.get('demandSide', ''),
+                        'price': item.get('purchaseBudget', '面议'),
+                        'coverage': item.get('coverRange', ''),
+                        'demand_type': item.get('demandType', ''),
+                    }
+                    all_demands.append(demand)
+                    added_count += 1
+
+                logger.info(f"华东数交第 {page} 页抓取 {len(items)} 条，新增 {added_count} 条")
+
+                # ===== 停止条件 =====
+                # 1. 如果当前页新增为 0，说明后续都是重复数据
+                if added_count == 0:
+                    logger.info("后续页面无新增数据，停止抓取")
+                    break
+
+                # 2. 如果已经达到总页数，停止
+                if total_pages and page >= total_pages:
+                    break
+
+                # 3. 如果当前页数据少于 page_size，说明是最后一页
+                if len(items) < page_size:
+                    break
+
+                page += 1
+
+            except Exception as e:
+                logger.error(f"华东数交抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"华东数交总计抓取 {len(all_demands)} 条（去重后）")
+        return all_demands
+
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
@@ -657,7 +918,10 @@ class ShangshuwangCrawler:
             ('杭州数交所', self.fetch_hangzhou),
             # ('深圳数交所', self.fetch_shenzhen),  # 待审核通过后启用
             ('山东数交所', self.fetch_shandong),
-            ('湖南数交所', self.fetch_hunan)
+            ('湖南数交所', self.fetch_hunan),
+            ('郑州数交所', self.fetch_zhengzhou),
+            ('华东数交所', self.fetch_huadong)
+
         ]
         for name, func in fetch_functions:
             try:
