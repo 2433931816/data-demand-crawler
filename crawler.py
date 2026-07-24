@@ -274,52 +274,71 @@ class ShangshuwangCrawler:
     # ---------- 数据源：上海数据交易所 ----------
     @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_shanghai(self) -> List[Dict]:
+        """抓取上海数据交易所的需求列表"""
         all_demands = []
         page = 1
         page_size = 20
+
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Content-Type": "application/json;charset=UTF-8",
             "Referer": "https://nidts.chinadep.com/",
-            "Origin": "https://nidts.chinadep.com",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Cookie": os.getenv('COOKIE_SHANGHAI', ''),
         }
+
         while True:
             try:
-                url = f"https://nidts.chinadep.com/daep/broker/product/visitor/pageProduct?pageSize={page_size}&pageNum={page}"
-                response = self.session.get(url, headers=headers, timeout=30)
-                response.raise_for_status()
+                url = "https://nidts.chinadep.com/dex-api/demand-bridge/demand/hall/list"
+                payload = {
+                    "pageNum": page,
+                    "pageSize": page_size,
+                }
+                response = self.session.post(url, headers=headers, json=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"上海数交所需求请求失败: {response.status_code}")
+                    break
+
                 data = response.json()
                 if data.get('code') != 200:
-                    logger.error(f"上海数交所 API 错误: {data.get('message')}")
+                    logger.error(f"上海数交所需求 API 错误: {data.get('message')}")
                     break
+
                 items = data.get('data', {}).get('list', [])
                 if not items:
                     break
+
                 if page == 1:
                     total = data.get('data', {}).get('total', 0)
-                    logger.info(f"上海数交所共 {total} 条商品")
+                    logger.info(f"上海数交所需求共 {total} 条")
+
                 for item in items:
                     demand = {
                         'source': '上海数据交易所',
-                        'title': item.get('dataName', '无标题'),
-                        'description': item.get('dataContent', ''),
-                        'publish_date': item.get('supplierProductReleaseTime', ''),
-                        'url': f"https://nidts.chinadep.com/product/{item.get('id', '')}",
-                        'category': item.get('dataType', ''),
-                        'supplier': item.get('supplierCompanyName', ''),
+                        'title': item.get('title', '无标题'),
+                        'description': item.get('description', ''),
+                        'publish_date': item.get('createTime', ''),
+                        'url': f"https://nidts.chinadep.com/demand/{item.get('id', '')}",
+                        'category': item.get('scene', ''),
+                        'budget': item.get('priceCap', 0),
+                        'keywords': ', '.join(item.get('keywords', [])),
+                        'status': item.get('status', ''),
                     }
                     all_demands.append(demand)
-                logger.info(f"上海数交所第 {page} 页抓取 {len(items)} 条")
+
+                logger.info(f"上海数交所需求第 {page} 页抓取 {len(items)} 条")
+
                 if len(items) < page_size:
                     break
                 page += 1
-            except requests.exceptions.RequestException as e:
-                logger.error(f"上海数交所第 {page} 页请求异常: {e}")
-                raise
+
             except Exception as e:
-                logger.error(f"上海数交所第 {page} 页失败: {e}")
-                raise
-        logger.info(f"上海数交所总计抓取 {len(all_demands)} 条")
+                logger.error(f"上海数交所需求抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"上海数交所需求总计抓取 {len(all_demands)} 条")
         return all_demands
 
     # ---------- 数据源：广州数据交易所 ----------
@@ -583,33 +602,33 @@ class ShangshuwangCrawler:
 
     @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_hunan(self) -> List[Dict]:
-        """抓取湖南大数据交易所的数据产品列表"""
+        """抓取湖南大数据交易所的需求列表"""
         all_demands = []
         page = 1
-        page_size = 50
+        page_size = 20
 
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-            "Authorization": "Bearer eyJ0eXAiOiJkVI1QiLCJhbGciOiJIUzI1NiJ9.eyJsb2dpblR5cGUiOiJsb2dpbilslmxVZ2luSWQiOiJzeXNFdXNlcjOyMDgwNTUxOTQyNTQyODM5ODEwliwicm5TdHliOiJIU0poZnlISXdidjIURE1jV3hIR09NakpHWUhGSUxvQylsnVzZXJJZCI6MjA4MDU1MTk0MjU0MjgzOTgxMH0.kQSAxdd4uqx14KHBh8VIFo2O4nsgg6M7TeZaDAw5qGU",
-            "Cookie": "Admin-Token=eyJ0eXAiOiJkVI1QiLCJhbGciOiJIUzI1NiJ9.eyJsb2dpblR5cGUiOiJsb2dpbilslmxVZ2luSWQiOiJzeXNFdXNlcjOyMDgwNTUxOTQyNTQyODM5ODEwliwicm5TdHliOiJIU0poZnlISXdidjIURE1jV3hIR09NakpHWUhGSUxvQylsnVzZXJJZCI6MjA4MDU1MTk0MjU0MjgzOTgxMH0.kQSAxdd4uqx14KHBh8VIFo2O4nsgg6M7TeZaDAw5qGU; zH_CN",
-            "Device-Type": "h5",
-            "Referer": "https://www.hunandex.com/",
+            "Authorization": os.getenv('AUTHORIZATION_HUNAN', ''),
+            "Referer": "https://trade.hunandex.com/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_HUNAN', ''),
         }
 
         while True:
             try:
-                url = f"https://trade.hunandex.com/prod-api/product/product/productData/list?pageNum={page}&pageSize={page_size}&isAsc=asc&orderByColumn=s.sort&name="
+                # 移除不可靠的排序参数，只保留分页
+                url = f"https://trade.hunandex.com/prod-api/product/product/demandProductReg/findDemandList?pageNum={page}&pageSize={page_size}"
                 response = self.session.get(url, headers=headers, timeout=30)
 
                 if response.status_code != 200:
-                    logger.error(f"湖南数交所请求失败: {response.status_code}")
+                    logger.error(f"湖南数交所需求请求失败: {response.status_code}")
                     break
 
                 data = response.json()
                 if data.get('code') != 200:
-                    logger.error(f"湖南数交所 API 错误: {data.get('msg')}")
+                    logger.error(f"湖南数交所需求 API 错误: {data.get('msg')}")
                     break
 
                 items = data.get('data', {}).get('rows', [])
@@ -618,33 +637,34 @@ class ShangshuwangCrawler:
 
                 if page == 1:
                     total = data.get('data', {}).get('total', 0)
-                    logger.info(f"湖南数交所共 {total} 条数据产品")
+                    logger.info(f"湖南数交所需求共 {total} 条")
 
                 for item in items:
                     demand = {
                         'source': '湖南大数据交易所',
-                        'title': item.get('name', '无标题'),
-                        'description': item.get('productIntroduce', ''),
-                        'publish_date': item.get('releaseTime', ''),
-                        'url': f"https://www.hunandex.com/product/{item.get('id', '')}",
-                        'category': item.get('scenariosNames', '') or item.get('sectorName', ''),
-                        'supplier': item.get('supplierName', ''),
-                        'price': item.get('price', '面议'),
-                        'product_type': item.get('productType', ''),
+                        'title': item.get('synopsis', '无标题'),
+                        'description': item.get('demandDetail', ''),
+                        'publish_date': item.get('createTime', ''),
+                        'url': f"https://www.hunandex.com/demand/{item.get('id', '')}",
+                        'category': '',
+                        'supplier': item.get('companyName', ''),
+                        'budget': item.get('budgetAmount', '面议'),
+                        'status': item.get('claimStatus', ''),
+                        'views': item.get('viewCount', 0),
                     }
                     all_demands.append(demand)
 
-                logger.info(f"湖南数交所第 {page} 页抓取 {len(items)} 条")
+                logger.info(f"湖南数交所需求第 {page} 页抓取 {len(items)} 条")
 
                 if len(items) < page_size:
                     break
                 page += 1
 
             except Exception as e:
-                logger.error(f"湖南数交所抓取第 {page} 页失败: {e}")
+                logger.error(f"湖南数交所需求抓取第 {page} 页失败: {e}")
                 break
 
-        logger.info(f"湖南数交所总计抓取 {len(all_demands)} 条")
+        logger.info(f"湖南数交所需求总计抓取 {len(all_demands)} 条")
         return all_demands
 
     @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
