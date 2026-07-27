@@ -479,9 +479,11 @@ class ShangshuwangCrawler:
     # ---------- 数据源：深圳数据交易所（待审核通过后启用） ----------
     @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_shenzhen(self) -> List[Dict]:
+        """抓取深圳数据交易所的需求列表"""
         all_demands = []
         page = 1
-        page_size = 12
+        page_size = 12  # 与浏览器一致
+
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
@@ -489,25 +491,45 @@ class ShangshuwangCrawler:
             "Referer": "https://www.szdex.com/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Cookie": os.getenv('COOKIE_SHENZHEN', ''),
+            "X-Requested-With": "XMLHttpRequest",
         }
+
         while True:
             try:
-                url = "https://www.szdex.com/dmall/v1.0/sjsp/spgl/pageQuerySjspList"
-                payload = {"page": page, "size": page_size}
+                url = "https://www.szdex.com/dmall/v1.0/qd/xqglQd/pageList"
+                payload = {
+                    "pageNo": page,  # 修正：原来是 page
+                    "pageSize": page_size,  # 修正：原来是 size
+                    "xqMc": "",
+                    "xqZt": "2",  # 需求状态：2=发布中
+                    "yylyIdList": [],
+                    "yycjIdList": [],
+                    "tags": [],
+                    "xqLx": "",
+                    "xqLxFId": "",
+                    "xqSfgk": 1,  # 公开需求
+                }
                 response = self.session.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
+
+                if response.status_code != 200:
+                    logger.error(f"深圳数交所需求请求失败: {response.status_code}")
+                    break
+
                 data = response.json()
                 if data.get('code') != 200:
-                    logger.error(f"深圳数交所 API 错误: {data.get('msg')}")
+                    logger.error(f"深圳数交所需求 API 错误: {data.get('msg')}")
                     break
-                items = data.get('data', {}).get('rows', [])
+
+                items = data.get('rows', [])
                 if not items:
                     break
+
                 if page == 1:
-                    total = data.get('data', {}).get('totalCount', 0)
-                    logger.info(f"深圳数交所共 {total} 条商品")
+                    total = data.get('total', 0)
+                    logger.info(f"深圳数交所需求共 {total} 条")
+
                 for item in items:
-                    raw_time = item.get('cjsj', '')
+                    raw_time = item.get('xqFbsj', '')
                     if raw_time:
                         try:
                             publish_date = datetime.fromtimestamp(int(raw_time) / 1000).strftime('%Y-%m-%d %H:%M:%S')
@@ -515,29 +537,32 @@ class ShangshuwangCrawler:
                             publish_date = ''
                     else:
                         publish_date = ''
+
                     demand = {
                         'source': '深圳数据交易所',
-                        'title': item.get('spMc', '无标题'),
-                        'description': item.get('spms', ''),
+                        'title': item.get('xqMc', '无标题'),
+                        'description': item.get('xqjj', ''),
                         'publish_date': publish_date,
-                        'url': f"https://www.szdex.com/product/{item.get('id', '')}",
-                        'category': item.get('spsjlxFlMc', ''),
-                        'supplier': item.get('fbfQyMc', ''),
-                        'price': item.get('xsjg', '面议'),
-                        'scene': item.get('yycjMcs', ''),
+                        'url': f"https://www.szdex.com/demand/{item.get('id', '')}",
+                        'category': item.get('yyhyMcs', ''),
+                        'supplier': item.get('xqYhMc', ''),
+                        'budget': item.get('xqYs', 0),
+                        'scene': item.get('ycyjMcs', ''),
+                        'status': item.get('xqZt', ''),
                     }
                     all_demands.append(demand)
-                logger.info(f"深圳数交所第 {page} 页抓取 {len(items)} 条")
+
+                logger.info(f"深圳数交所需求第 {page} 页抓取 {len(items)} 条")
+
                 if len(items) < page_size:
                     break
                 page += 1
-            except requests.exceptions.RequestException as e:
-                logger.error(f"深圳数交所第 {page} 页请求异常: {e}")
-                raise
+
             except Exception as e:
-                logger.error(f"深圳数交所第 {page} 页失败: {e}")
-                raise
-        logger.info(f"深圳数交所总计抓取 {len(all_demands)} 条")
+                logger.error(f"深圳数交所需求抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"深圳数交所需求总计抓取 {len(all_demands)} 条")
         return all_demands
 
     def fetch_shandong(self) -> List[Dict]:
@@ -1094,6 +1119,61 @@ class ShangshuwangCrawler:
 
         logger.info(f"安徽数交所总计抓取 {len(all_demands)} 条（去重后）")
         return all_demands
+
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_bbg(self) -> List[Dict]:
+        """抓取北部湾大数据交易中心的需求列表（从HTML解析）"""
+        all_demands = []
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_BBG', ''),
+        }
+        try:
+            url = "https://www.bbgdex.com/demand/put"
+            response = self.session.get(url, headers=headers, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"北部湾数交所请求失败: {response.status_code}")
+                return all_demands
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # 找到所有需求条目
+            items = soup.select('.demand-item')
+            if not items:
+                logger.warning("北部湾数交所未找到需求条目，可能需要登录")
+                return all_demands
+
+            logger.info(f"北部湾数交所找到 {len(items)} 条需求")
+
+            for item in items:
+                # 标题
+                title_elem = item.select_one('.title')
+                title = title_elem.text.strip() if title_elem else '无标题'
+
+                # 描述（如果有）
+                desc_elem = item.select_one('.desc, .description')
+                description = desc_elem.text.strip() if desc_elem else ''
+
+                # 电话（如果有）
+                phone_elem = item.select_one('.tel')
+                phone = phone_elem.text.strip() if phone_elem else ''
+
+                demand = {
+                    'source': '北部湾大数据交易中心',
+                    'title': title,
+                    'description': description,
+                    'publish_date': '',
+                    'url': url,
+                    'category': '',
+                    'phone': phone,
+                }
+                all_demands.append(demand)
+
+            logger.info(f"北部湾数交所抓取完成，发现 {len(all_demands)} 条需求")
+        except Exception as e:
+            logger.error(f"北部湾数交所抓取失败: {e}")
+        return all_demands
+
+
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
@@ -1109,7 +1189,9 @@ class ShangshuwangCrawler:
             ('郑州数交所', self.fetch_zhengzhou),
             ('华东数交所', self.fetch_huadong),
             ('福建数交所', self.fetch_fujian),
-            ('安徽数交所', self.fetch_anhui)
+            ('安徽数交所', self.fetch_anhui),
+            ('北部湾数交所', self.fetch_bbg),
+
 
         ]
         for name, func in fetch_functions:
