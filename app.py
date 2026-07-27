@@ -3,6 +3,11 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 import io
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -80,8 +85,9 @@ def api_dashboard():
     today_df = df[df['created_at'].str.startswith(today)]
     today_list = today_df[['title', 'source', 'created_at']].head(20).to_dict('records')
 
-    # 所有数据源列表（用于前端下拉菜单）
+    # ✅ 所有数据源列表（从数据库动态读取）
     all_sources = df['source'].unique().tolist()
+    logger.info(f"数据源列表（共 {len(all_sources)} 个）: {all_sources}")
 
     return jsonify({
         'total': total,

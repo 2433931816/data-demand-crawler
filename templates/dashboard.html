@@ -368,56 +368,58 @@
     }
 
     function fetchData() {
-        const start = document.getElementById('startDate').value;
-        const end = document.getElementById('endDate').value;
-        const source = document.getElementById('sourceSelect').value;
-        const url = `/api/dashboard?start_date=${start}&end_date=${end}&source=${source}`;
+    const start = document.getElementById('startDate').value;
+    const end = document.getElementById('endDate').value;
+    const source = document.getElementById('sourceSelect').value;
+    const url = `/api/dashboard?start_date=${start}&end_date=${end}&source=${source}`;
 
-        fetch(url)
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    console.warn('无数据');
-                    return;
-                }
-                // 更新卡片
-                document.getElementById('total').innerText = data.total;
-                document.getElementById('today').innerText = data.today_count;
-                document.getElementById('sources').innerText = Object.keys(data.source_counts).length;
-                document.getElementById('categories').innerText = Object.keys(data.category_counts).length;
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.warn('无数据');
+                return;
+            }
+            // 更新卡片
+            document.getElementById('total').innerText = data.total;
+            document.getElementById('today').innerText = data.today_count;
+            document.getElementById('sources').innerText = Object.keys(data.source_counts).length;
+            document.getElementById('categories').innerText = Object.keys(data.category_counts).length;
 
-                // 填充来源下拉菜单
-                if (data.all_sources && document.getElementById('sourceSelect').options.length === 1) {
-                    const select = document.getElementById('sourceSelect');
-                    data.all_sources.forEach(s => {
-                        const opt = document.createElement('option');
-                        opt.value = s;
-                        opt.text = s;
-                        select.appendChild(opt);
-                    });
-                    if (data.current_source && data.current_source !== 'all') {
-                        select.value = data.current_source;
-                    }
-                }
 
-                // 今日列表
-                const list = document.getElementById('todayItems');
-                list.innerHTML = '';
-                if (data.today_list && data.today_list.length > 0) {
-                    data.today_list.forEach(item => {
-                        const li = document.createElement('li');
-                        li.innerHTML = `<span>${item.title}</span><span class="source-tag">${item.source}</span>`;
-                        list.appendChild(li);
-                    });
-                } else {
-                    list.innerHTML = '<li class="empty">今日暂无新增需求</li>';
-                }
-
-                renderCharts(data);
-                updateTimestamp();
-            })
-            .catch(err => console.error('数据加载失败:', err));
+            // 每次刷新时重新构建下拉菜单（保留“全部”选项）
+if (data.all_sources) {
+    const select = document.getElementById('sourceSelect');
+    select.innerHTML = '<option value="all">全部</option>';
+    data.all_sources.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.text = s;
+        select.appendChild(opt);
+    });
+    if (data.current_source && data.current_source !== 'all') {
+        select.value = data.current_source;
     }
+}
+
+            // 今日列表
+            const list = document.getElementById('todayItems');
+            list.innerHTML = '';
+            if (data.today_list && data.today_list.length > 0) {
+                data.today_list.forEach(item => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span>${item.title}</span><span class="source-tag">${item.source}</span>`;
+                    list.appendChild(li);
+                });
+            } else {
+                list.innerHTML = '<li class="empty">今日暂无新增需求</li>';
+            }
+
+            renderCharts(data);
+            updateTimestamp();
+        })
+        .catch(err => console.error('数据加载失败:', err));
+}
 
     function renderCharts(data) {
         // 销毁旧图表
@@ -533,15 +535,13 @@
     document.getElementById('applyFilter').addEventListener('click', fetchData);
     document.getElementById('exportBtn').addEventListener('click', exportCSV);
 
-    // 初始化日期（最近30天）
+
     window.onload = function() {
-        const today = new Date();
-        const thirtyDaysAgo = new Date(today);
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-        document.getElementById('startDate').value = thirtyDaysAgo.toISOString().split('T')[0];
-        document.getElementById('endDate').value = today.toISOString().split('T')[0];
-        fetchData();
-    };
+    // 不设置日期，查询全部数据
+    document.getElementById('startDate').value = '';
+    document.getElementById('endDate').value = '';
+    fetchData();
+};
 
     // 每5分钟自动刷新
     setInterval(fetchData, 300000);
