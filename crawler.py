@@ -1173,6 +1173,79 @@ class ShangshuwangCrawler:
             logger.error(f"北部湾数交所抓取失败: {e}")
         return all_demands
 
+    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    def fetch_zhejiang(self) -> List[Dict]:
+        """抓取浙江大数据交易服务平台的需求列表"""
+        all_demands = []
+        page = 1
+        page_size = 10
+        total_pages = None
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Authorization": os.getenv('AUTHORIZATION_ZHEJIANG', ''),
+            "Content-Type": "application/json;charset=UTF-8",
+            "Referer": "https://ditm.zjdex.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": os.getenv('COOKIE_ZHEJIANG', ''),
+        }
+
+        while True:
+            try:
+                url = "https://ditm.zjdex.com/tsslapi/demand/home"
+                payload = {
+                    "pageNum": page,
+                    "pageSize": page_size,
+                    "timestamp": int(datetime.now().timestamp() * 1000),  # 时间戳（毫秒）
+                }
+                response = self.session.post(url, headers=headers, json=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.error(f"浙江数交所请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+                if data.get('code') != 'SUCCESS':
+                    logger.error(f"浙江数交所 API 错误: {data.get('msg')}")
+                    break
+
+                items = data.get('data', {}).get('list', [])
+
+                if page == 1:
+                    total = data.get('data', {}).get('total', 0)
+                    total_pages = data.get('data', {}).get('totalPage', 1)
+                    logger.info(f"浙江数交所共 {total} 条需求，共 {total_pages} 页")
+
+                if not items:
+                    break
+
+                for item in items:
+                    demand = {
+                        'source': '浙江大数据交易服务平台',
+                        'title': item.get('name', '无标题'),
+                        'description': item.get('synopsis', ''),
+                        'publish_date': item.get('createTime', ''),
+                        'url': f"https://ditm.zjdex.com/demand/{item.get('id', '')}",
+                        'category': item.get('parentCategoryName', ''),
+                        'supplier': item.get('companyName', ''),
+                    }
+                    all_demands.append(demand)
+
+                logger.info(f"浙江数交所第 {page} 页抓取 {len(items)} 条")
+
+                if len(items) < page_size:
+                    break
+                if total_pages and page >= total_pages:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"浙江数交所抓取第 {page} 页失败: {e}")
+                break
+
+        logger.info(f"浙江数交所总计抓取 {len(all_demands)} 条")
+        return all_demands
 
     # ---------- 统一调度 ----------
     def fetch_all(self):
@@ -1191,6 +1264,7 @@ class ShangshuwangCrawler:
             ('福建数交所', self.fetch_fujian),
             ('安徽数交所', self.fetch_anhui),
             ('北部湾数交所', self.fetch_bbg),
+            ('浙江数交所', self.fetch_zhejiang),
 
 
         ]
