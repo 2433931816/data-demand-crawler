@@ -848,7 +848,7 @@ class ShangshuwangCrawler:
         all_demands = []
         seen_ids = set()
         page = 1
-        page_size = 50
+        page_size = 100
         total_pages = None
 
         headers = {
