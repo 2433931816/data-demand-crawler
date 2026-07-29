@@ -14,6 +14,7 @@ import html
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 
+
 # ======================== 加载环境变量 ========================
 load_dotenv()
 
@@ -479,90 +480,105 @@ class ShangshuwangCrawler:
     # ---------- 数据源：深圳数据交易所（待审核通过后启用） ----------
     @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
     def fetch_shenzhen(self) -> List[Dict]:
-        """抓取深圳数据交易所的需求列表"""
+        """
+        抓取深圳数据交易所公众号发布的需求列表
+        通过解析公众号文章中的结构化需求信息
+        """
         all_demands = []
-        page = 1
-        page_size = 12  # 与浏览器一致
+
+        article_urls = [
+            "https://mp.weixin.qq.com/s/OG7SgBZVhWKvtxYJcq96FA",
+        ]
 
         headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-            "Content-Type": "application/json",
-            "Referer": "https://www.szdex.com/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Cookie": os.getenv('COOKIE_SHENZHEN', ''),
-            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
 
-        while True:
+        for url in article_urls:
             try:
-                url = "https://www.szdex.com/dmall/v1.0/qd/xqglQd/pageList"
-                payload = {
-                    "pageNo": page,  # 修正：原来是 page
-                    "pageSize": page_size,  # 修正：原来是 size
-                    "xqMc": "",
-                    "xqZt": "2",  # 需求状态：2=发布中
-                    "yylyIdList": [],
-                    "yycjIdList": [],
-                    "tags": [],
-                    "xqLx": "",
-                    "xqLxFId": "",
-                    "xqSfgk": 1,  # 公开需求
-                }
-                response = self.session.post(url, headers=headers, json=payload, timeout=30)
-
+                response = self.session.get(url, headers=headers, timeout=30)
                 if response.status_code != 200:
-                    logger.error(f"深圳数交所需求请求失败: {response.status_code}")
-                    break
+                    logger.error(f"深数所公众号文章请求失败: {url}, 状态码: {response.status_code}")
+                    continue
 
-                data = response.json()
-                if data.get('code') != 200:
-                    logger.error(f"深圳数交所需求 API 错误: {data.get('msg')}")
-                    break
+                soup = BeautifulSoup(response.text, 'html.parser')
+                content = soup.find('div', class_='rich_media_content')
+                if not content:
+                    logger.warning(f"未找到文章内容: {url}")
+                    continue
 
-                items = data.get('rows', [])
-                if not items:
-                    break
+                text = content.get_text(separator='\n', strip=True)
 
-                if page == 1:
-                    total = data.get('total', 0)
-                    logger.info(f"深圳数交所需求共 {total} 条")
+                # 打印完整文本长度和结构（调试用）
+                logger.info(f"文章总长度: {len(text)} 字符")
 
-                for item in items:
-                    raw_time = item.get('xqFbsj', '')
-                    if raw_time:
-                        try:
-                            publish_date = datetime.fromtimestamp(int(raw_time) / 1000).strftime('%Y-%m-%d %H:%M:%S')
-                        except:
-                            publish_date = ''
-                    else:
-                        publish_date = ''
+                # 方法1：通过 "01"、"02" 等标记分割
+                import re
+                # 匹配 "01"、"02" 等单独成行的数字标记
+                blocks = re.split(r'\n\s*(0[1-9])\s*\n', text)
+
+                # 如果上面分割失败，尝试通过 "需求说明" 关键字分割
+                if len(blocks) <= 1:
+                    blocks = re.split(r'(?=需求说明[：:])', text)
+
+                # 提取需求
+                for i, block in enumerate(blocks):
+                    # 跳过空块
+                    if not block or len(block.strip()) < 10:
+                        continue
+
+                    # 尝试提取标题（第一行或包含"需求"的行）
+                    lines = block.strip().split('\n')
+                    title = ''
+                    for line in lines[:5]:  # 检查前5行
+                        line_clean = line.strip()
+                        if line_clean and len(line_clean) > 3:
+                            # 如果行中有"需求"或"数据集"，很可能是标题
+                            if '需求' in line_clean or '数据集' in line_clean:
+                                title = line_clean.replace('**', '').strip()
+                                break
+
+                    if not title:
+                        # 如果没有明确标题，取第一行作为标题
+                        title = lines[0].strip().replace('**', '').strip() if lines else f'需求_{i}'
+                        if len(title) > 50:
+                            title = title[:50] + '...'
+
+                    # 提取需求说明
+                    desc_match = re.search(r'需求说明[：:]\s*(.*?)(?=数据要求[：:]|数据集建设要求[：:]|$)', block,
+                                           re.DOTALL)
+                    description = desc_match.group(1).strip() if desc_match else ''
+
+                    # 提取数据要求
+                    req_match = re.search(r'(?:数据要求|数据集建设要求)[：:]\s*(.*?)(?=需求说明[：:]|$)', block,
+                                          re.DOTALL)
+                    detailed_requirements = req_match.group(1).strip() if req_match else ''
+
+                    # 提取联系方式
+                    phone_match = re.search(r'电话[：:]\s*([\d\-]+)', block)
+                    phone = phone_match.group(1) if phone_match else ''
+
+                    # 如果标题看起来不像需求，跳过
+                    if '深圳数据交易所' in title or '数据需求发布' in title or len(title) < 3:
+                        continue
 
                     demand = {
                         'source': '深圳数据交易所',
-                        'title': item.get('xqMc', '无标题'),
-                        'description': item.get('xqjj', ''),
-                        'publish_date': publish_date,
-                        'url': f"https://www.szdex.com/demand/{item.get('id', '')}",
-                        'category': item.get('yyhyMcs', ''),
-                        'supplier': item.get('xqYhMc', ''),
-                        'budget': item.get('xqYs', 0),
-                        'scene': item.get('ycyjMcs', ''),
-                        'status': item.get('xqZt', ''),
+                        'title': title,
+                        'description': description[:500] if description else '',
+                        'detailed_requirements': detailed_requirements[:500] if detailed_requirements else '',
+                        'publish_date': '',
+                        'url': url,
+                        'category': '',
+                        'phone': phone,
                     }
                     all_demands.append(demand)
-
-                logger.info(f"深圳数交所需求第 {page} 页抓取 {len(items)} 条")
-
-                if len(items) < page_size:
-                    break
-                page += 1
+                    logger.info(f"从深数所公众号提取需求: {title}")
 
             except Exception as e:
-                logger.error(f"深圳数交所需求抓取第 {page} 页失败: {e}")
-                break
+                logger.error(f"深数所公众号文章解析失败: {url}, 错误: {e}")
 
-        logger.info(f"深圳数交所需求总计抓取 {len(all_demands)} 条")
+        logger.info(f"深圳数据交易所公众号抓取完成，发现 {len(all_demands)} 条需求")
         return all_demands
 
     def fetch_shandong(self) -> List[Dict]:
@@ -1256,7 +1272,7 @@ class ShangshuwangCrawler:
             ('上海数交所', self.fetch_shanghai),
             ('广州数交所', self.fetch_guangzhou),
             ('杭州数交所', self.fetch_hangzhou),
-            # ('深圳数交所', self.fetch_shenzhen),  # 待审核通过后启用
+             ('深数网公众号', self.fetch_shenzhen),
             ('山东数交所', self.fetch_shandong),
             ('湖南数交所', self.fetch_hunan),
             ('郑州数交所', self.fetch_zhengzhou),

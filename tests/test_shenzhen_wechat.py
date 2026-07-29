@@ -1,32 +1,26 @@
 import requests
-import os
-from dotenv import load_dotenv
-import json
+from bs4 import BeautifulSoup
+import re
 
-load_dotenv()
+url = "https://mp.weixin.qq.com/s/OG7SgBZVhWKvtxYJcq96FA"
+headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-url = "https://www.szdex.com/dmall/v1.0/qd/xqglQd/pageList"
-headers = {
-    "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "Referer": "https://www.szdex.com/",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Cookie": os.getenv('COOKIE_SHENZHEN', ''),
-    "X-Requested-With": "XMLHttpRequest",
-}
-payload = {
-    "pageNo": 1,
-    "pageSize": 12,
-    "xqMc": "",
-    "xqZt": "2",
-    "yylyIdList": [],
-    "yycjIdList": [],
-    "tags": [],
-    "xqLx": "",
-    "xqLxFId": "",
-    "xqSfgk": 1,
-}
+r = requests.get(url, headers=headers, timeout=30)
+print(f"状态码: {r.status_code}")
+soup = BeautifulSoup(r.text, 'html.parser')
 
-response = requests.post(url, headers=headers, json=payload, timeout=30)
-print("状态码:", response.status_code)
-print("响应内容:", response.text)
+content = soup.find('div', class_='rich_media_content')
+if content:
+    print("=" * 60)
+    print("找到 rich_media_content，内容前800字符:")
+    print(content.get_text()[:800])
+    print("=" * 60)
+else:
+    print("未找到 rich_media_content")
+
+# 也尝试其他可能的 class
+for cls in ['rich_media_content', 'article-content', 'content']:
+    c = soup.find('div', class_=cls)
+    if c:
+        print(f"找到 class: {cls}, 内容前300字符: {c.get_text()[:300]}")
+        break

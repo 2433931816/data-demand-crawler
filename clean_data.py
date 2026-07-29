@@ -24,24 +24,22 @@ os.makedirs(LOG_DIR, exist_ok=True)
 log_file = os.path.join(LOG_DIR, 'clean.log')
 logger = logging.getLogger('clean_data')
 logger.setLevel(logging.INFO)
-
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-
-file_handler = RotatingFileHandler(
-    log_file,
-    maxBytes=5 * 1024 * 1024,  # 5MB
-    backupCount=5,
-    encoding='utf-8'
-)
-file_handler.setLevel(logging.INFO)
-
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-file_handler.setFormatter(formatter)
-
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+# 确保日志处理器不会重复添加
+if not logger.hasHandlers():
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,  # 5MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
 
 # ======================== 分类映射表 ========================
 BEIJING_CATEGORY_MAP = {
@@ -64,10 +62,8 @@ SHANGHAI_CATEGORY_MAP = {
 GUANGZHOU_CATEGORY_MAP = {
     '购买意向': '数据采购',
     '供给意向': '数据供给',
-    # 后续发现新类型可在此添加
 }
 
-# ===== 新增：杭州数据交易所分类映射 =====
 HANGZHOU_CATEGORY_MAP = {
     'DATA_DEMAND': '数据采购',
     'DATA_SUPPLY': '数据供给',
@@ -76,7 +72,6 @@ HANGZHOU_CATEGORY_MAP = {
     'DATA_TOOL': '数据工具',
 }
 
-# ===== 新增：深圳数据交易所分类映射（预置，待正式接入后生效） =====
 SHENZHEN_CATEGORY_MAP = {
     '数据产品': '数据产品',
     '数据服务': '数据服务',
@@ -103,7 +98,6 @@ def send_wechat_alert(message: str):
 
 # ======================== HTML 清洗函数 ========================
 def clean_html_aggressive(raw: str) -> str:
-    """使用 BeautifulSoup 彻底清除所有HTML标签，提取纯文本"""
     if not raw:
         return ''
     try:
@@ -124,7 +118,6 @@ def clean_html_aggressive(raw: str) -> str:
 # ======================== 从 raw_data 恢复字段 ========================
 def recover_fields_from_raw(cursor):
     logger.info("🔄 从 raw_data 恢复字段...")
-    # 上海
     cursor.execute("""
         SELECT id, raw_data FROM demands 
         WHERE source = '上海数据交易所' 
@@ -143,7 +136,6 @@ def recover_fields_from_raw(cursor):
         except:
             pass
     logger.info(f"✅ 上海数交所: 恢复 {recovered} 条")
-    # 北京
     cursor.execute("""
         SELECT id, raw_data FROM demands 
         WHERE source = '北京国际大数据交易所' 
@@ -302,23 +294,18 @@ def _perform_cleaning(db_path='./demands.db'):
     conn.close()
 
     # ========== 分类映射转换 ==========
-    # 北京
     df.loc[df['source'] == '北京国际大数据交易所', 'category'] = df[df['source'] == '北京国际大数据交易所']['category'].map(
         lambda x: BEIJING_CATEGORY_MAP.get(str(x), str(x)) if pd.notna(x) else x
     )
-    # 上海
     df.loc[df['source'] == '上海数据交易所', 'category'] = df[df['source'] == '上海数据交易所']['category'].map(
         lambda x: SHANGHAI_CATEGORY_MAP.get(str(x), str(x)) if pd.notna(x) else x
     )
-    # 广州
     df.loc[df['source'] == '广州数据交易所', 'category'] = df[df['source'] == '广州数据交易所']['category'].map(
         lambda x: GUANGZHOU_CATEGORY_MAP.get(x, x) if pd.notna(x) else x
     )
-    # ===== 新增：杭州 =====
     df.loc[df['source'] == '杭州数据交易所', 'category'] = df[df['source'] == '杭州数据交易所']['category'].map(
         lambda x: HANGZHOU_CATEGORY_MAP.get(x, x) if pd.notna(x) else x
     )
-    # ===== 新增：深圳（预置，待正式接入后生效） =====
     df.loc[df['source'] == '深圳数据交易所', 'category'] = df[df['source'] == '深圳数据交易所']['category'].map(
         lambda x: SHENZHEN_CATEGORY_MAP.get(x, x) if pd.notna(x) else x
     )
@@ -334,7 +321,7 @@ def _perform_cleaning(db_path='./demands.db'):
     clean_old_backups(db_path)
     return df, today_df
 
-# ======================== 每日增量 ========================
+# ======================== 每日增量（定时任务专用） ========================
 def clean_and_export_daily(db_path='./demands.db'):
     logger.info("\n" + "=" * 60)
     logger.info("🧹 每日增量清洗与导出（定时任务）")
@@ -354,10 +341,10 @@ def clean_and_export_daily(db_path='./demands.db'):
         logger.info(f"📈 今日新增 {len(today_df)} 条 → {inc_path}")
     else:
         logger.info("📈 今日无新增数据，未生成增量文件")
-    check_data_quality(db_path)
+    # ✅ 定时任务只导出增量，不打印质量报告，避免重复输出
     logger.info("✅ 每日增量任务完成\n")
 
-# ======================== 手动全量 ========================
+# ======================== 手动全量（含完整质量报告） ========================
 def clean_and_export_full(db_path='./demands.db'):
     logger.info("\n" + "=" * 60)
     logger.info("📦 全量清洗与导出（手动运行）")
@@ -394,6 +381,7 @@ def clean_and_export_full(db_path='./demands.db'):
         logger.info("📈 今日无新增数据")
     logger.info("\n📊 数据统计:")
     logger.info(df['source'].value_counts().to_string())
+    # ✅ 手动全量运行时才打印完整质量报告
     check_data_quality(db_path)
     logger.info("✅ 全量任务完成\n")
 
