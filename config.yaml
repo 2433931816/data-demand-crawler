@@ -1,21 +1,14 @@
-# config.yaml
 sources:
   beijing:
     name: "北京国际大数据交易所"
     base_url: "https://www.bjidex.com"
-    demand_url: "https://www.bjidex.com/demand"  # 需确认实际路径
+    demand_url: "https://www.bjidex.com/demand"
     type: "website"
 
   shanghai:
     name: "上海数据交易所"
     base_url: "https://www.chinadep.com"
-    demand_url: "https://www.chinadep.com/demand-hall"  # 需确认
-    type: "website"
-
-  shenzhen:
-    name: "深圳数据交易所"
-    base_url: "https://www.szdex.com"
-    demand_url: "https://www.szdex.com/demand"  # 需确认
+    demand_url: "https://www.chinadep.com/demand-hall"
     type: "website"
 
   shangshuwang:
@@ -29,4 +22,9 @@ storage:
   db_file: "./demands.db"
 
 schedule:
-  time: "08:00"  # 每日更新时间
+  time: "08:00"
+
+shenzhen:
+  article_urls:
+    - "https://mp.weixin.qq.com/s/0G7SgBZVhWkVtxYJcq96FA"
+    - "https://mp.weixin.qq.com/s/B2ftcVTVcL1rixRQFKaQRw"

@@ -68,14 +68,37 @@ def clean_html(raw: str) -> str:
 # ======================== 主爬虫类 ========================
 class ShangshuwangCrawler:
     def __init__(self):
+        # 1. Session 初始化
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         })
+
+        # 2. 加载配置文件
+        import yaml
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            self.config = yaml.safe_load(f)
+
+        # 3. 从配置读取深圳文章链接
+        self.shenzhen_article_urls = self.config.get('shenzhen', {}).get('article_urls', [])
+
+        # 4. 初始化数据库
         self._init_db()
 
+        def _load_parsed_articles(self) -> set:
+            """加载已解析的文章链接"""
+            try:
+                with open('parsed_articles.txt', 'r', encoding='utf-8') as f:
+                    return set(line.strip() for line in f if line.strip())
+            except FileNotFoundError:
+                return set()
+
+        def _save_parsed_article(self, url: str):
+            """保存已解析的文章链接"""
+            with open('parsed_articles.txt', 'a', encoding='utf-8') as f:
+                f.write(url + '\n')
     # ---------- 数据库初始化 ----------
     def _init_db(self):
         self.conn = sqlite3.connect('./demands.db')
@@ -477,103 +500,239 @@ class ShangshuwangCrawler:
         logger.info(f"杭州数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
-    # ---------- 数据源：深圳数据交易所（待审核通过后启用） ----------
-    @retry_on_error(max_retries=3, delay=2, exceptions=(requests.exceptions.RequestException,))
+    # ---------- 数据源：深数网微信公众号 ----------
+    def _load_parsed_articles(self) -> set:
+        """加载已解析的文章链接"""
+        try:
+            with open('parsed_articles.txt', 'r', encoding='utf-8') as f:
+                return set(line.strip() for line in f if line.strip())
+        except FileNotFoundError:
+            return set()
+
+    def _save_parsed_article(self, url: str):
+        """保存已解析的文章链接"""
+        with open('parsed_articles.txt', 'a', encoding='utf-8') as f:
+            f.write(url + '\n')
+
     def fetch_shenzhen(self) -> List[Dict]:
         """
         抓取深圳数据交易所公众号发布的需求列表
-        通过解析公众号文章中的结构化需求信息
+        支持多种需求格式：01/02、采购需求1/2、需求一/二
         """
         all_demands = []
 
-        article_urls = [
-            "https://mp.weixin.qq.com/s/OG7SgBZVhWKvtxYJcq96FA",
-        ]
+        # 加载已解析的文章链接
+        parsed_urls = self._load_parsed_articles()
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        # 从配置读取文章链接
+        article_urls = self.shenzhen_article_urls
+        print(f"article_urls: {article_urls}")
+        if not article_urls:
+            logger.warning("深圳数交所文章链接列表为空，请检查 config.yaml")
+            return all_demands
+
+        wechat_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         }
 
         for url in article_urls:
+            # 检查是否已解析
+            if url in parsed_urls:
+                logger.info(f"跳过已解析文章: {url}")
+                continue
+
             try:
-                response = self.session.get(url, headers=headers, timeout=30)
+                response = self.session.get(url, headers=wechat_headers, timeout=30)
                 if response.status_code != 200:
                     logger.error(f"深数所公众号文章请求失败: {url}, 状态码: {response.status_code}")
                     continue
 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 content = soup.find('div', class_='rich_media_content')
+
                 if not content:
-                    logger.warning(f"未找到文章内容: {url}")
                     continue
 
-                text = content.get_text(separator='\n', strip=True)
+                clean_text = content.get_text(separator='\n', strip=True)
 
-                # 打印完整文本长度和结构（调试用）
+                if len(clean_text) < 50:
+                    continue
+
+                text = clean_text
                 logger.info(f"文章总长度: {len(text)} 字符")
 
-                # 方法1：通过 "01"、"02" 等标记分割
                 import re
-                # 匹配 "01"、"02" 等单独成行的数字标记
-                blocks = re.split(r'\n\s*(0[1-9])\s*\n', text)
 
-                # 如果上面分割失败，尝试通过 "需求说明" 关键字分割
+                # ===== 方法1：匹配 "**01**"、"**02**" 格式 =====
+                blocks = re.split(r'\*\*0[1-9]\*\*', text)
+
+                # ===== 方法2：匹配 "采购需求1"、"采购需求2" 格式 =====
                 if len(blocks) <= 1:
-                    blocks = re.split(r'(?=需求说明[：:])', text)
+                    blocks = re.split(r'(?:采购需求|需求发布)[：:]?\s*(?=\d)', text)
+                    if len(blocks) <= 1:
+                        blocks = re.split(r'(?:采购需求|需求发布)[：:]?\s*', text)
+                    if blocks and not blocks[0].strip():
+                        blocks = blocks[1:]
 
-                # 提取需求
-                for i, block in enumerate(blocks):
-                    # 跳过空块
+                # ===== 方法3：匹配 "需求一"、"需求二" 格式 =====
+                if len(blocks) <= 1:
+                    blocks = re.split(r'需求[一二三四五六七八九十]+[、，]?\s*', text)
+                    if blocks and not blocks[0].strip():
+                        blocks = blocks[1:]
+
+                # ===== 方法4：匹配 "01"、"02"（无加粗）格式 =====
+                if len(blocks) <= 1:
+                    blocks = re.split(r'\n\s*(0[1-9])\s*\n', text)
+                    if len(blocks) > 1:
+                        filtered = []
+                        for b in blocks:
+                            if b.strip() in ['01', '02', '03', '04', '05', '06', '07', '08', '09']:
+                                continue
+                            if b.strip():
+                                filtered.append(b)
+                        blocks = filtered
+
+                # 如果没有匹配到任何格式，按段落分割取包含关键词的段落
+                if len(blocks) <= 1:
+                    lines = text.split('\n')
+                    current_block = []
+                    for line in lines:
+                        line = line.strip()
+                        if any(kw in line for kw in ['产品类型', '产品描述', '数据要求', '需求说明']):
+                            if current_block:
+                                blocks.append('\n'.join(current_block))
+                            current_block = [line]
+                        elif current_block:
+                            current_block.append(line)
+                    if current_block:
+                        blocks.append('\n'.join(current_block))
+
+                demand_count = 0
+                for block in blocks:
                     if not block or len(block.strip()) < 10:
                         continue
 
-                    # 尝试提取标题（第一行或包含"需求"的行）
                     lines = block.strip().split('\n')
+
+                    # 提取标题
+                    # ===== 优化后的标题提取 =====
                     title = ''
-                    for line in lines[:5]:  # 检查前5行
-                        line_clean = line.strip()
-                        if line_clean and len(line_clean) > 3:
-                            # 如果行中有"需求"或"数据集"，很可能是标题
-                            if '需求' in line_clean or '数据集' in line_clean:
-                                title = line_clean.replace('**', '').strip()
+                    full_block = '\n'.join(lines)
+                    full_block = full_block.replace('**', '').replace('*', '')
+
+                    # 1. 优先提取 "需求说明" 前面的内容作为标题
+                    title_match = re.search(r'(.+?)(?:需求说明[：:]|数据要求[：:]|$)', full_block, re.DOTALL)
+                    if title_match:
+                        title = title_match.group(1).strip()
+                        title = title.replace('**', '').replace('*', '').strip()
+                        # 如果标题包含"产品类型"，则忽略，继续往下找
+                        if '产品类型' in title:
+                            title = ''
+
+                    # 2. 如果上面没匹配到或匹配到的是"产品类型"，取前两行
+                    if not title or '产品类型' in title:
+                        for line in lines[:5]:
+                            line_clean = line.strip().replace('**', '').replace('*', '').strip()
+                            if line_clean and len(line_clean) > 3:
+                                # 跳过包含"产品类型"、"数据要求"等关键词的行
+                                if any(skip in line_clean for skip in ['产品类型', '数据要求', '需求说明', '覆盖范围']):
+                                    continue
+                                title = line_clean
+                                break
+
+                    # 3. 如果还是没提取到，取第一行非空内容
+                    if not title:
+                        for line in lines[:3]:
+                            line_clean = line.strip().replace('**', '').replace('*', '').strip()
+                            if line_clean and len(line_clean) > 3:
+                                title = line_clean
                                 break
 
                     if not title:
-                        # 如果没有明确标题，取第一行作为标题
-                        title = lines[0].strip().replace('**', '').strip() if lines else f'需求_{i}'
-                        if len(title) > 50:
-                            title = title[:50] + '...'
-
-                    # 提取需求说明
-                    desc_match = re.search(r'需求说明[：:]\s*(.*?)(?=数据要求[：:]|数据集建设要求[：:]|$)', block,
-                                           re.DOTALL)
-                    description = desc_match.group(1).strip() if desc_match else ''
-
-                    # 提取数据要求
-                    req_match = re.search(r'(?:数据要求|数据集建设要求)[：:]\s*(.*?)(?=需求说明[：:]|$)', block,
-                                          re.DOTALL)
-                    detailed_requirements = req_match.group(1).strip() if req_match else ''
-
-                    # 提取联系方式
-                    phone_match = re.search(r'电话[：:]\s*([\d\-]+)', block)
-                    phone = phone_match.group(1) if phone_match else ''
-
-                    # 如果标题看起来不像需求，跳过
-                    if '深圳数据交易所' in title or '数据需求发布' in title or len(title) < 3:
                         continue
 
-                    demand = {
-                        'source': '深圳数据交易所',
-                        'title': title,
-                        'description': description[:500] if description else '',
-                        'detailed_requirements': detailed_requirements[:500] if detailed_requirements else '',
-                        'publish_date': '',
-                        'url': url,
-                        'category': '',
-                        'phone': phone,
-                    }
-                    all_demands.append(demand)
-                    logger.info(f"从深数所公众号提取需求: {title}")
+                    # 如果标题包含"产品类型"，用后面的内容替代
+                    if '产品类型' in title:
+                        for line in lines:
+                            line_clean = line.strip().replace('**', '').replace('*', '').strip()
+                            if line_clean and len(line_clean) > 3 and '产品类型' not in line_clean:
+                                if any(kw in line_clean for kw in ['数据集', '需求', '训练']):
+                                    title = line_clean
+                                    break
+                    if not title:
+                        continue
+
+                    full_block = '\n'.join(lines)
+                    full_block = full_block.replace('**', '').replace('*', '')
+
+                    # 提取产品描述
+                    desc_match = re.search(
+                        r'产品描述[：:]\s*(.*?)(?=数据覆盖范围|产品类型|交付形式|计费方式|数据要求|需求说明|$)',
+                        full_block, re.DOTALL)
+                    description = desc_match.group(1).strip() if desc_match else ''
+
+                    # 提取需求说明
+                    if not description:
+                        desc_match = re.search(r'需求说明[：:]\s*(.*?)(?=数据要求|数据覆盖范围|产品类型|$)', full_block,
+                                               re.DOTALL)
+                        description = desc_match.group(1).strip() if desc_match else ''
+
+                    # 提取数据覆盖范围
+                    scope_match = re.search(r'数据覆盖范围[：:]\s*(.*?)(?=数据更新频率|交付形式|产品类型|$)', full_block,
+                                            re.DOTALL)
+                    scope = scope_match.group(1).strip() if scope_match else ''
+
+                    # 提取交付形式
+                    delivery_match = re.search(r'交付形式[：:]\s*(.*?)(?=计费方式|产品类型|$)', full_block, re.DOTALL)
+                    delivery = delivery_match.group(1).strip() if delivery_match else ''
+
+                    # 提取数据要求
+                    req_match = re.search(r'数据要求[：:]\s*(.*?)(?=需求说明|数据覆盖范围|产品类型|$)', full_block,
+                                          re.DOTALL)
+                    detailed_req = req_match.group(1).strip() if req_match else ''
+
+                    # 产品类型
+                    type_match = re.search(r'产品类型[：:]\s*(.*?)(?=产品描述|数据覆盖范围|$)', full_block, re.DOTALL)
+                    product_type = type_match.group(1).strip() if type_match else ''
+
+                    if product_type:
+                        title = f"{product_type} - {title}" if title else product_type
+
+                    title = title.replace('**', '').replace('*', '').strip()
+                    if len(title) > 60:
+                        title = title[:60] + '...'
+
+                    if title and not any(skip in title for skip in ['深圳数据交易所', '声明', '扫码', '扫码关注']):
+                        desc_parts = []
+                        if description:
+                            desc_parts.append(description)
+                        if scope:
+                            desc_parts.append(f"覆盖范围: {scope}")
+                        if delivery:
+                            desc_parts.append(f"交付形式: {delivery}")
+                        if detailed_req:
+                            desc_parts.append(f"数据要求: {detailed_req[:200]}")
+
+                        final_desc = '\n'.join(desc_parts) if desc_parts else ''
+
+                        demand = {
+                            'source': '深圳数据交易所',
+                            'title': title,
+                            'description': final_desc[:800] if final_desc else '',
+                            'detailed_requirements': detailed_req[:500] if detailed_req else '',
+                            'publish_date': '',
+                            'url': url,
+                            'category': product_type,
+                        }
+                        all_demands.append(demand)
+                        demand_count += 1
+                        logger.info(f"从深数所公众号提取需求: {title}")
+
+                logger.info(f"本篇文章提取到 {demand_count} 条需求")
+
+                # 解析成功后，标记为已解析
+                self._save_parsed_article(url)
+                parsed_urls.add(url)
 
             except Exception as e:
                 logger.error(f"深数所公众号文章解析失败: {url}, 错误: {e}")
