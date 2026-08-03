@@ -54,8 +54,14 @@ def api_dashboard():
 
     # 总览指标
     total = len(df)
+
+    # 今日新增（独立查询，不受前端日期参数影响）
     today = datetime.now().strftime('%Y-%m-%d')
-    today_count = df[df['created_at'].str.startswith(today)].shape[0]
+    conn2 = get_db_connection()
+    today_query = "SELECT * FROM demands WHERE DATE(created_at) = DATE('now')"
+    today_df_full = pd.read_sql_query(today_query, conn2)
+    conn2.close()
+    today_count = len(today_df_full)
 
     # 来源分布
     source_counts = df['source'].value_counts().to_dict()
@@ -82,10 +88,9 @@ def api_dashboard():
     last_7_data = {d: daily_counts.get(d, 0) for d in last_7_dates}
 
     # 今日新增列表（前20条）
-    today_df = df[df['created_at'].str.startswith(today)]
-    today_list = today_df[['title', 'source', 'created_at']].head(20).to_dict('records')
+    today_list = today_df_full[['title', 'source', 'created_at']].head(20).to_dict('records')
 
-    # ✅ 所有数据源列表（从数据库动态读取）
+    # 所有数据源列表
     all_sources = df['source'].unique().tolist()
     logger.info(f"数据源列表（共 {len(all_sources)} 个）: {all_sources}")
 
