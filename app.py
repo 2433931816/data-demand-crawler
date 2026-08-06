@@ -294,6 +294,66 @@ def api_demands():
 
 
 # ==============================================================
+@app.route('/api/export_excel')
+def export_excel():
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    source = request.args.get('source', 'all')
 
+    conn = get_db_connection()
+    query = "SELECT source, title, description, category, publish_date, url, created_at FROM demands WHERE 1=1"
+    params = []
+    if start_date:
+        query += " AND created_at >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at <= ?"
+        params.append(end_date + ' 23:59:59')
+    if source != 'all':
+        query += " AND source = ?"
+        params.append(source)
+    query += " ORDER BY created_at DESC"
+
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+
+    if df.empty:
+        return "无数据可导出", 400
+
+    import openpyxl
+    from openpyxl.styles import Font, Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "数据需求"
+
+    headers = ['来源', '标题', '描述', '分类', '发布时间', '链接', '入库时间']
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center')
+
+    for row_idx, row in enumerate(df.itertuples(), 2):
+        ws.cell(row=row_idx, column=1, value=row.source)
+        ws.cell(row=row_idx, column=2, value=row.title)
+        ws.cell(row=row_idx, column=3, value=row.description[:500] if row.description else '')
+        ws.cell(row=row_idx, column=4, value=row.category or '')
+        ws.cell(row=row_idx, column=5, value=row.publish_date or '')
+        ws.cell(row=row_idx, column=6, value=row.url or '')
+        ws.cell(row=row_idx, column=7, value=row.created_at or '')
+
+    for col in range(1, 8):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 20
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'demands_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    )
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
