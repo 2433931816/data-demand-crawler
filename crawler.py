@@ -114,9 +114,15 @@ class ShangshuwangCrawler:
                 url TEXT,
                 raw_data TEXT,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                source_priority INTEGER DEFAULT 2
             )
         ''')
+        # 为已有数据库添加 source_priority 字段（如果不存在）
+        try:
+            self.cursor.execute('ALTER TABLE demands ADD COLUMN source_priority INTEGER DEFAULT 2')
+        except sqlite3.OperationalError:
+            pass  # 字段已存在，忽略
         self.conn.commit()
 
     def _generate_id(self, source: str, title: str, date: str) -> str:
@@ -134,6 +140,9 @@ class ShangshuwangCrawler:
                 demand['title'],
                 demand.get('publish_date', '')
             )
+            # 获取 source_priority，默认值为 2（网站来源）
+            source_priority = demand.get('source_priority', 2)
+
             self.cursor.execute("SELECT created_at FROM demands WHERE id = ?", (demand_id,))
             existing = self.cursor.fetchone()
             if existing:
@@ -147,7 +156,8 @@ class ShangshuwangCrawler:
                         publish_date = ?,
                         url = ?,
                         raw_data = ?,
-                        updated_at = ?
+                        updated_at = ?,
+                        source_priority = ?
                     WHERE id = ?
                 ''', (
                     demand['source'],
@@ -158,13 +168,14 @@ class ShangshuwangCrawler:
                     demand.get('url', ''),
                     json.dumps(demand, ensure_ascii=False),
                     now,
+                    source_priority,
                     demand_id
                 ))
             else:
                 self.cursor.execute('''
                     INSERT INTO demands
-                    (id, source, title, description, category, publish_date, url, raw_data, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, source, title, description, category, publish_date, url, raw_data, created_at, updated_at, source_priority)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     demand_id,
                     demand['source'],
@@ -175,7 +186,8 @@ class ShangshuwangCrawler:
                     demand.get('url', ''),
                     json.dumps(demand, ensure_ascii=False),
                     now,
-                    now
+                    now,
+                    source_priority
                 ))
         self.conn.commit()
         logger.info(f"成功保存 {len(demands)} 条需求")
@@ -225,13 +237,23 @@ class ShangshuwangCrawler:
                 intro = item.get('sample_intro', '')
                 clean = clean_html(intro)
                 title = clean[:50] if clean else '无标题'
+
+                # ✅ 修复 url：优先使用 firstUrl，但如果是内部路径则用 id 构造完整链接
+                first_url = item.get('firstUrl', '')
+                if first_url and first_url.startswith('http'):
+                    demand_url = first_url
+                else:
+                    # 直接用 id 构造尚数网详情页链接
+                    demand_url = f"https://shangshuwang.cn/demand/{item.get('id', '')}"
+
                 demand = {
                     'source': '尚数网',
                     'title': title,
                     'description': clean,
                     'publish_date': item.get('publish_time', '') or item.get('publishTime', ''),
-                    'url': item.get('firstUrl') or f"https://shangshuwang.cn/demand/{item.get('id', '')}",
+                    'url': demand_url,
                     'category': item.get('app_range', ''),
+                    'source_priority': 2,
                 }
                 demands.append(demand)
             logger.info(f"尚数网第 {page_number} 页抓取 {len(demands)} 条")
@@ -280,6 +302,7 @@ class ShangshuwangCrawler:
                         'publish_date': item.get('createTime', ''),
                         'url': f"https://mix.bjidex.com/demand/{item.get('id', '')}",
                         'category': item.get('demandType', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
                 logger.info(f"北京数交所第 {page} 页抓取 {len(rows)} 条")
@@ -349,6 +372,7 @@ class ShangshuwangCrawler:
                         'budget': item.get('priceCap', 0),
                         'keywords': ', '.join(item.get('keywords', [])),
                         'status': item.get('status', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
 
@@ -425,6 +449,7 @@ class ShangshuwangCrawler:
                         'scene': item.get('YYCJ_NOTE', ''),
                         'status': item.get('ZT_NOTE', ''),
                         'tags': item.get('XQBQ', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
                 if len(items) < page_size:
@@ -485,6 +510,7 @@ class ShangshuwangCrawler:
                         'publish_date': item.get('createdAt', ''),
                         'url': f"https://h5.hzdex.cn/demand/{item.get('id', '')}",
                         'category': item.get('demandType', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
                 logger.info(f"杭州数交所第 {page} 页抓取 {len(items)} 条")
@@ -723,6 +749,7 @@ class ShangshuwangCrawler:
                             'publish_date': '',
                             'url': url,
                             'category': product_type,
+                            'source_priority': 1,
                         }
                         all_demands.append(demand)
                         demand_count += 1
@@ -784,6 +811,7 @@ class ShangshuwangCrawler:
                         'publish_date': item.get('gmtCreate', ''),
                         'url': f"https://www.sddep.com/demand/{item.get('id', '')}",
                         'category': '',  # 可后续映射 type 或 dataType
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
 
@@ -851,6 +879,7 @@ class ShangshuwangCrawler:
                         'budget': item.get('budgetAmount', '面议'),
                         'status': item.get('claimStatus', ''),
                         'views': item.get('viewCount', 0),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
 
@@ -937,6 +966,7 @@ class ShangshuwangCrawler:
                         'contact': item.get('contacts', ''),
                         'phone': item.get('contactsPhone', ''),
                         'scene_desc': item.get('appScenariosDescription', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
                     added_count += 1
@@ -1001,6 +1031,7 @@ class ShangshuwangCrawler:
                         'category': item.get('productClassifyName', ''),
                         'supplier': item.get('need', ''),
                         'price': item.get('capitalBudget', '面议'),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
 
@@ -1098,6 +1129,7 @@ class ShangshuwangCrawler:
                         'price': item.get('purchaseBudget', '面议'),
                         'coverage': item.get('coverRange', ''),
                         'demand_type': item.get('demandType', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
                     added_count += 1
@@ -1177,6 +1209,7 @@ class ShangshuwangCrawler:
                         'url': f"https://trade.fjbdtex.com/demand/{item.get('id', '')}",
                         'category': item.get('demandScene', ''),
                         'supplier': item.get('companyName', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
 
@@ -1270,6 +1303,7 @@ class ShangshuwangCrawler:
                         'status': item.get('needStatusName', ''),
                         'tags': tags_str,
                         'views': item.get('pageViews', 0),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
                     added_count += 1
@@ -1340,6 +1374,7 @@ class ShangshuwangCrawler:
                     'url': url,
                     'category': '',
                     'phone': phone,
+                    'source_priority': 2,
                 }
                 all_demands.append(demand)
 
@@ -1404,6 +1439,7 @@ class ShangshuwangCrawler:
                         'url': f"https://ditm.zjdex.com/demand/{item.get('id', '')}",
                         'category': item.get('parentCategoryName', ''),
                         'supplier': item.get('companyName', ''),
+                        'source_priority': 2,
                     }
                     all_demands.append(demand)
 
@@ -1422,6 +1458,7 @@ class ShangshuwangCrawler:
         logger.info(f"浙江数交所总计抓取 {len(all_demands)} 条")
         return all_demands
 
+
     # ---------- 统一调度 ----------
     def fetch_all(self):
         all_demands = []
@@ -1431,7 +1468,7 @@ class ShangshuwangCrawler:
             ('上海数交所', self.fetch_shanghai),
             ('广州数交所', self.fetch_guangzhou),
             ('杭州数交所', self.fetch_hangzhou),
-             ('深数网公众号', self.fetch_shenzhen),
+            ('深数网公众号', self.fetch_shenzhen),
             ('山东数交所', self.fetch_shandong),
             ('湖南数交所', self.fetch_hunan),
             ('郑州数交所', self.fetch_zhengzhou),
@@ -1440,8 +1477,6 @@ class ShangshuwangCrawler:
             ('安徽数交所', self.fetch_anhui),
             ('北部湾数交所', self.fetch_bbg),
             ('浙江数交所', self.fetch_zhejiang),
-
-
         ]
         for name, func in fetch_functions:
             try:
@@ -1451,7 +1486,12 @@ class ShangshuwangCrawler:
                 logger.info(f"{name} 抓取完成，共 {len(demands)} 条")
             except Exception as e:
                 logger.error(f"{name} 抓取失败: {e}")
+
         if all_demands:
+            # ✅ 按 source_priority 排序（公众号优先，值为1的排在前面）
+            all_demands.sort(key=lambda x: x.get('source_priority', 2))
+            logger.info("数据已按来源优先级排序（公众号优先）")
+
             self._save_demands(all_demands)
             self._export_csv()
         else:

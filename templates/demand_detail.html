@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>需求详情</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #f1f5f9;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+
+        .header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            padding: 20px 32px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .header h1 {
+            color: #fff;
+            font-weight: 600;
+            font-size: 1.3rem;
+        }
+        .header a {
+            color: #94a3b8;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .header a:hover { color: #fff; }
+
+        .detail-card {
+            background: #fff;
+            padding: 24px 32px;
+            border-radius: 16px;
+            border: 1px solid #e9edf4;
+            margin-bottom: 16px;
+        }
+        .detail-card .title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 12px;
+        }
+        .detail-card .meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #e9edf4;
+        }
+        .detail-card .meta .source-tag {
+            background: #eef2ff;
+            color: #4f46e5;
+            padding: 2px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+        .detail-card .meta .priority-tag {
+            background: #fef3c7;
+            color: #b45309;
+            padding: 2px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+        .detail-card .label {
+            font-weight: 600;
+            color: #0f172a;
+            margin-top: 12px;
+            margin-bottom: 4px;
+        }
+        .detail-card .value {
+            color: #475569;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+        .detail-card .source-link {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e9edf4;
+        }
+        .detail-card .source-link a {
+            color: #3b82f6;
+            text-decoration: none;
+            word-break: break-all;
+        }
+        .detail-card .source-link a:hover {
+            text-decoration: underline;
+        }
+        .detail-card .source-link .no-link {
+            color: #94a3b8;
+        }
+
+        .loading, .error {
+            text-align: center;
+            color: #94a3b8;
+            padding: 40px 0;
+        }
+        .error { color: #ef4444; }
+
+        @media (max-width: 768px) {
+            .header { flex-direction: column; align-items: flex-start; gap: 12px; }
+            .detail-card { padding: 16px 20px; }
+            .detail-card .title { font-size: 1.2rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <header class="header">
+        <h1>📄 需求详情</h1>
+        <a href="/">← 返回首页</a>
+    </header>
+
+    <div id="detailContent">
+        <div class="loading">加载中...</div>
+    </div>
+
+</div>
+
+<script>
+    const id = window.location.pathname.split('/').pop();
+
+    function isValidUrl(url) {
+        if (!url) return false;
+        return url.startsWith('http://') || url.startsWith('https://');
+    }
+
+    function loadDetail() {
+        const container = document.getElementById('detailContent');
+
+        fetch(`/api/demand/${id}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.code !== 0 || !res.data) {
+                    container.innerHTML = `<div class="error">❌ 需求不存在或加载失败</div>`;
+                    return;
+                }
+
+                const d = res.data;
+                const priorityLabel = d.source_priority === 1 ? '<span class="priority-tag">⭐ 公众号来源</span>' : '';
+
+                // 判断原始来源是否有效
+                const hasValidUrl = isValidUrl(d.url);
+                const sourceHtml = hasValidUrl
+                    ? `<a href="${d.url}" target="_blank">${d.url}</a>`
+                    : '<span class="no-link">暂无原始链接</span>';
+
+                container.innerHTML = `
+                    <div class="detail-card">
+                        <div class="title">${d.title || '无标题'}</div>
+                        <div class="meta">
+                            <span class="source-tag">${d.source || '未知来源'}</span>
+                            ${priorityLabel}
+                            <span>📅 ${d.publish_date || d.created_at?.slice(0,10) || '未知日期'}</span>
+                            ${d.category ? `<span>📂 ${d.category}</span>` : ''}
+                        </div>
+
+                        ${d.description ? `
+                            <div class="label">📝 需求描述</div>
+                            <div class="value">${d.description}</div>
+                        ` : ''}
+
+                        ${d.detailed_requirements ? `
+                            <div class="label">📋 详细要求</div>
+                            <div class="value">${d.detailed_requirements}</div>
+                        ` : ''}
+
+                        ${d.supplier ? `
+                            <div class="label">🏢 需求方</div>
+                            <div class="value">${d.supplier}</div>
+                        ` : ''}
+
+                        ${d.budget ? `
+                            <div class="label">💰 预算</div>
+                            <div class="value">${d.budget}</div>
+                        ` : ''}
+
+                        ${d.phone ? `
+                            <div class="label">📞 联系方式</div>
+                            <div class="value">${d.phone}</div>
+                        ` : ''}
+
+                        <div class="source-link">
+                            🔗 原始来源：${sourceHtml}
+                        </div>
+                    </div>
+                `;
+            })
+            .catch(err => {
+                container.innerHTML = `<div class="error">❌ 加载失败</div>`;
+                console.error(err);
+            });
+    }
+
+    loadDetail();
+</script>
+</body>
+</html>
