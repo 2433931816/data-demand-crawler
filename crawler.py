@@ -87,7 +87,7 @@ class ShangshuwangCrawler:
         # 4. 初始化数据库
         self._init_db()
 
-        def _load_parsed_articles(self) -> set:
+        def _load_parsed_articles(self) -> set:  # Akiyamadao
             """加载已解析的文章链接"""
             try:
                 with open('parsed_articles.txt', 'r', encoding='utf-8') as f:
@@ -95,7 +95,7 @@ class ShangshuwangCrawler:
             except FileNotFoundError:
                 return set()
 
-        def _save_parsed_article(self, url: str):
+        def _save_parsed_article(self, url: str):  # Akiyamadao
             """保存已解析的文章链接"""
             with open('parsed_articles.txt', 'a', encoding='utf-8') as f:
                 f.write(url + '\n')
@@ -527,17 +527,19 @@ class ShangshuwangCrawler:
         return all_demands
 
     # ---------- 数据源：深数网微信公众号 ----------
-    def _load_parsed_articles(self) -> set:
-        """加载已解析的文章链接"""
+    def _load_parsed_article(self) -> set:
+        """
+        加载已解析的文章链接"""
         try:
-            with open('parsed_articles.txt', 'r', encoding='utf-8') as f:
+            with open('parsed_articles.txt', 'r', encoding='utf-8-sig') as f:
                 return set(line.strip() for line in f if line.strip())
         except FileNotFoundError:
             return set()
 
     def _save_parsed_article(self, url: str):
-        """保存已解析的文章链接"""
-        with open('parsed_articles.txt', 'a', encoding='utf-8') as f:
+        """
+        保存已解析的文章链接"""
+        with open('parsed_articles.txt', 'a', encoding='utf-8-sig') as f:
             f.write(url + '\n')
 
     def fetch_shenzhen(self) -> List[Dict]:
@@ -548,7 +550,7 @@ class ShangshuwangCrawler:
         all_demands = []
 
         # 加载已解析的文章链接
-        parsed_urls = self._load_parsed_articles()
+        parsed_urls = self._load_parsed_article()
 
         # 从配置读取文章链接
         article_urls = self.shenzhen_article_urls
@@ -765,6 +767,243 @@ class ShangshuwangCrawler:
                 logger.error(f"深数所公众号文章解析失败: {url}, 错误: {e}")
 
         logger.info(f"深圳数据交易所公众号抓取完成，发现 {len(all_demands)} 条需求")
+        return all_demands
+
+    def fetch_beijing_wechat(self) -> List[Dict]:
+        """
+        抓取北京国际大数据交易所公众号发布的需求/征集信息
+        支持：征集通知、数据寻源、数据需求清单等
+        """
+        all_demands = []
+
+        # 加载已解析的文章链接
+        parsed_urls = self._load_parsed_article()
+
+        # 从配置读取文章链接
+        article_urls = self.config.get('beijing_wechat', {}).get('article_urls', [])
+        print(f"article_urls: {article_urls}")
+        if not article_urls:
+            logger.warning("北京数交所公众号文章链接列表为空，请检查 config.yaml")
+            return all_demands
+
+        wechat_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        }
+
+        for url in article_urls:
+            # 检查是否已解析
+            if url in parsed_urls:
+                logger.info(f"跳过已解析文章: {url}")
+                continue
+
+            try:
+                response = self.session.get(url, headers=wechat_headers, timeout=30)
+                if response.status_code != 200:
+                    logger.error(f"北京数交所公众号文章请求失败: {url}, 状态码: {response.status_code}")
+                    continue
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                content = soup.find('div', class_='rich_media_content')
+
+                if not content:
+                    continue
+
+                clean_text = content.get_text(separator='\n', strip=True)
+
+                if len(clean_text) < 50:
+                    continue
+
+                text = clean_text
+                logger.info(f"文章总长度: {len(text)} 字符")
+
+                import re
+
+                # ===== 方法1：匹配 "**01**"、"**02**" 格式 =====
+                blocks = re.split(r'\*\*0[1-9]\*\*', text)
+
+                # ===== 方法2：匹配 "征集方向一"、"需求一" 等 =====
+                if len(blocks) <= 1:
+                    blocks = re.split(r'(?:征集方向|需求)[一二三四五六七八九十]+[、，]?\s*', text)
+                    if blocks and not blocks[0].strip():
+                        blocks = blocks[1:]
+
+                # ===== 方法3：匹配 "一、"、"二、" 或 "1."、"2." =====
+                if len(blocks) <= 1:
+                    blocks = re.split(r'\n\s*[一二三四五六七八九十]+[、.．]\s*', text)
+                    if blocks and not blocks[0].strip():
+                        blocks = blocks[1:]
+
+                if len(blocks) <= 1:
+                    blocks = re.split(r'\n\s*[1-9][、.．]\s*', text)
+                    if blocks and not blocks[0].strip():
+                        blocks = blocks[1:]
+
+                # ===== 方法4：匹配 "01"、"02"（无加粗）格式 =====
+                if len(blocks) <= 1:
+                    blocks = re.split(r'\n\s*(0[1-9])\s*\n', text)
+                    if len(blocks) > 1:
+                        filtered = []
+                        for b in blocks:
+                            if b.strip() in ['01', '02', '03', '04', '05', '06', '07', '08', '09']:
+                                continue
+                            if b.strip():
+                                filtered.append(b)
+                        blocks = filtered
+
+                # 如果没有匹配到任何格式，按段落分割取包含关键词的段落
+                if len(blocks) <= 1:
+                    lines = text.split('\n')
+                    current_block = []
+                    for line in lines:
+                        line = line.strip()
+                        if any(kw in line for kw in ['征集方向', '需求方向', '征集内容', '需求内容', '数据需求']):
+                            if current_block:
+                                blocks.append('\n'.join(current_block))
+                            current_block = [line]
+                        elif current_block:
+                            current_block.append(line)
+                    if current_block:
+                        blocks.append('\n'.join(current_block))
+
+                # ===== 提取联系方式（北京特有） =====
+                contact = ''
+                contact_patterns = [
+                    r'联系方式?[：:]\s*(.*?)(?=$)',
+                    r'联系人[：:]\s*([^\n]+)',
+                    r'电话[：:]\s*([^\n]+)',
+                ]
+                for pattern in contact_patterns:
+                    match = re.search(pattern, text, re.DOTALL)
+                    if match:
+                        contact = match.group(1).strip()
+                        break
+
+                phone = ''
+                phone_match = re.search(r'\d{11}', contact) if contact else None
+                if phone_match:
+                    phone = phone_match.group(0)
+                if not phone:
+                    phone_match = re.search(r'\d{3,4}[- ]?\d{7,8}', contact) if contact else None
+                    if phone_match:
+                        phone = phone_match.group(0)
+
+                demand_count = 0
+                for block in blocks:
+                    if not block or len(block.strip()) < 10:
+                        continue
+
+                    lines = block.strip().split('\n')
+
+                    # ===== 提取标题（与深圳逻辑一致） =====
+                    title = ''
+                    full_block = '\n'.join(lines)
+                    full_block = full_block.replace('**', '').replace('*', '')
+
+                    # 1. 优先提取 "需求说明"/"征集内容" 前面的内容作为标题
+                    title_match = re.search(r'(.+?)(?:需求说明[：:]|征集内容[：:]|数据要求[：:]|$)', full_block, re.DOTALL)
+                    if title_match:
+                        title = title_match.group(1).strip()
+                        title = title.replace('**', '').replace('*', '').strip()
+                        # 如果标题包含"产品类型"或类似词，则忽略
+                        if any(skip in title for skip in ['产品类型', '数据要求', '需求说明', '征集要求']):
+                            title = ''
+
+                    # 2. 如果上面没匹配到，取前两行
+                    if not title:
+                        for line in lines[:5]:
+                            line_clean = line.strip().replace('**', '').replace('*', '').strip()
+                            if line_clean and len(line_clean) > 3:
+                                if any(skip in line_clean for skip in
+                                       ['产品类型', '数据要求', '需求说明', '征集要求', '覆盖范围']):
+                                    continue
+                                title = line_clean
+                                break
+
+                    # 3. 如果还是没提取到，取第一行非空内容
+                    if not title:
+                        for line in lines[:3]:
+                            line_clean = line.strip().replace('**', '').replace('*', '').strip()
+                            if line_clean and len(line_clean) > 3:
+                                title = line_clean
+                                break
+
+                    if not title:
+                        continue
+
+                    full_block = '\n'.join(lines)
+                    full_block = full_block.replace('**', '').replace('*', '')
+
+                    # ===== 提取征集内容/需求说明（与深圳逻辑一致） =====
+                    desc_match = re.search(
+                        r'(?:征集内容|需求说明)[：:]\s*(.*?)(?=征集要求|数据要求|联系方式|$)',
+                        full_block, re.DOTALL)
+                    description = desc_match.group(1).strip() if desc_match else ''
+
+                    if not description:
+                        desc_match = re.search(
+                            r'(?:需求方向|征集方向)[：:]\s*(.*?)(?=征集要求|数据要求|联系方式|$)',
+                            full_block, re.DOTALL)
+                        description = desc_match.group(1).strip() if desc_match else ''
+
+                    # ===== 提取征集要求/数据要求（与深圳逻辑一致） =====
+                    req_match = re.search(
+                        r'(?:征集要求|数据要求)[：:]\s*(.*?)(?=联系方式|$)',
+                        full_block, re.DOTALL)
+                    detailed_req = req_match.group(1).strip() if req_match else ''
+
+                    # ===== 判断文章类型（北京特有） =====
+                    article_type = '数据需求'
+                    text_preview = text[:500]
+                    if '征集通知' in text_preview:
+                        article_type = '征集通知'
+                    elif '数据寻源' in text_preview or '数据需求' in text_preview:
+                        article_type = '数据寻源'
+                    elif '需求公告' in text_preview:
+                        article_type = '需求公告'
+                    elif '图像数据' in text_preview or '数据集' in text_preview:
+                        article_type = '数据需求清单'
+
+                    title = title.replace('**', '').replace('*', '').strip()
+                    if len(title) > 60:
+                        title = title[:60] + '...'
+
+                    if title and not any(
+                            skip in title for skip in ['北京国际大数据交易所', '声明', '扫码', '扫码关注']):
+                        desc_parts = []
+                        if description:
+                            desc_parts.append(description)
+                        if detailed_req:
+                            desc_parts.append(f"要求: {detailed_req[:200]}")
+                        if contact:
+                            desc_parts.append(f"联系方式: {contact}")
+
+                        final_desc = '\n'.join(desc_parts) if desc_parts else ''
+
+                        demand = {
+                            'source': '北京国际大数据交易所-公众号',
+                            'title': title,
+                            'description': final_desc[:800] if final_desc else '',
+                            'detailed_requirements': detailed_req[:500] if detailed_req else '',
+                            'publish_date': '',
+                            'url': url,
+                            'category': article_type,
+                            'phone': phone,
+                            'source_priority': 1,
+                        }
+                        all_demands.append(demand)
+                        demand_count += 1
+                        logger.info(f"从北京数交所公众号提取需求: {title}")
+
+                logger.info(f"本篇文章提取到 {demand_count} 条需求")
+
+                # 解析成功后，标记为已解析
+                self._save_parsed_article(url)
+                parsed_urls.add(url)
+
+            except Exception as e:
+                logger.error(f"北京数交所公众号文章解析失败: {url}, 错误: {e}")
+
+        logger.info(f"北京国际大数据交易所公众号抓取完成，发现 {len(all_demands)} 条需求")
         return all_demands
 
     def fetch_shandong(self) -> List[Dict]:
@@ -1477,6 +1716,7 @@ class ShangshuwangCrawler:
             ('安徽数交所', self.fetch_anhui),
             ('北部湾数交所', self.fetch_bbg),
             ('浙江数交所', self.fetch_zhejiang),
+            ('北数所公众号',self.fetch_beijing_wechat()),
         ]
         for name, func in fetch_functions:
             try:

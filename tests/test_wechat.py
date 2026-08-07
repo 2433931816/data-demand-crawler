@@ -79,7 +79,6 @@ def search_wechat_articles(keyword: str, max_pages: int = 2) -> list:
 
     finally:
         driver.quit()
- aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     return articles
 
 

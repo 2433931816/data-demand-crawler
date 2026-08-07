@@ -28,3 +28,8 @@ shenzhen:
   article_urls:
     - "https://mp.weixin.qq.com/s/0G7SgBZVhWkVtxYJcq96FA"
     - "https://mp.weixin.qq.com/s/B2ftcVTVcL1rixRQFKaQRw"
+
+beijing_wechat:
+  article_urls:
+    - "https://mp.weixin.qq.com/s/ycHwzaozs7I_3vmJebJ6TA"
+    - "https://mp.weixin.qq.com/s/RVw-kQmDb1ORq15OIxs7YQ"
