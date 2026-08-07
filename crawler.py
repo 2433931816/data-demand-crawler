@@ -87,12 +87,23 @@ class ShangshuwangCrawler:
         # 4. 初始化数据库
         self._init_db()
 
-        def _load_parsed_articles(self) -> set:  # Akiyamadao
+        def _load_parsed_article(self) -> set:
             """加载已解析的文章链接"""
             try:
                 with open('parsed_articles.txt', 'r', encoding='utf-8') as f:
-                    return set(line.strip() for line in f if line.strip())
+                    content = f.read()
+                    if not content.strip():
+                        return set()
+                    return set(line.strip() for line in content.splitlines() if line.strip())
             except FileNotFoundError:
+                return set()
+            except UnicodeDecodeError:
+                # 如果编码错误，尝试删除并重建文件
+                logger.warning("parsed_articles.txt 编码错误，正在重建...")
+                try:
+                    os.remove('parsed_articles.txt')
+                except:
+                    pass
                 return set()
 
         def _save_parsed_article(self, url: str):  # Akiyamadao
@@ -1716,7 +1727,7 @@ class ShangshuwangCrawler:
             ('安徽数交所', self.fetch_anhui),
             ('北部湾数交所', self.fetch_bbg),
             ('浙江数交所', self.fetch_zhejiang),
-            ('北数所公众号',self.fetch_beijing_wechat()),
+            ('北数所公众号', self.fetch_beijing_wechat),  # ✅ 去掉括号
         ]
         for name, func in fetch_functions:
             try:

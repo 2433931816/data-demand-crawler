@@ -303,23 +303,38 @@
         document.getElementById('lastUpdate').textContent = '⏱ 最后更新：' + new Date().toLocaleString('zh-CN');
     }
 
+    // ===== 加载来源列表（关键修复） =====
     function loadSources() {
         fetch('/api/dashboard')
             .then(r => r.json())
             .then(data => {
-                if (data.all_sources) {
+                if (data.all_sources && data.all_sources.length > 0) {
                     const select = document.getElementById('sourceSelect');
-                    data.all_sources.forEach(s => {
+                    // 保留第一个"全部数据源"选项
+                    select.innerHTML = '<option value="all">全部数据源</option>';
+                    // 按字母顺序排序，让查找更方便
+                    const sortedSources = data.all_sources.sort();
+                    sortedSources.forEach(s => {
                         const opt = document.createElement('option');
                         opt.value = s;
                         opt.text = s;
                         select.appendChild(opt);
                     });
+                    console.log('✅ 已加载来源列表，共 ' + sortedSources.length + ' 个来源');
+                } else {
+                    console.warn('⚠️ 未获取到来源列表');
                 }
+                // ✅ 来源加载完成后，再加载需求列表
+                loadDemands(1);
             })
-            .catch(() => {});
+            .catch(err => {
+                console.error('❌ 加载来源失败:', err);
+                // 即使加载失败，也尝试加载需求
+                loadDemands(1);
+            });
     }
 
+    // ===== 加载统计信息 =====
     function loadStats() {
         fetch('/api/dashboard')
             .then(r => r.json())
@@ -334,6 +349,7 @@
             .catch(() => {});
     }
 
+    // ===== 加载重点推荐 =====
     function loadRecommendations() {
         fetch('/api/demands?page=1&page_size=5&sort_by=source_priority&sort_order=asc')
             .then(r => r.json())
@@ -355,6 +371,7 @@
             });
     }
 
+    // ===== 加载需求列表 =====
     function loadDemands(page) {
         const keyword = document.getElementById('keywordInput').value;
         const source = document.getElementById('sourceSelect').value;
@@ -393,6 +410,7 @@
                 `).join('');
 
                 renderPagination(data);
+                // 刷新统计信息
                 loadStats();
             })
             .catch(err => {
@@ -401,6 +419,7 @@
             });
     }
 
+    // ===== 渲染分页 =====
     function renderPagination(data) {
         const totalPages = data.total_pages || 1;
         const current = data.page || 1;
@@ -420,14 +439,18 @@
         container.innerHTML = html;
     }
 
+    // ===== 导出 Excel =====
     function exportExcel() {
-        const start = document.getElementById('startDate')?.value || '';
-        const end = document.getElementById('endDate')?.value || '';
+        const keyword = document.getElementById('keywordInput').value;
         const source = document.getElementById('sourceSelect').value;
-        window.open(`/api/export_excel?start_date=${start}&end_date=${end}&source=${source}`, '_blank');
+        // 构建导出URL，包含当前筛选条件
+        let url = '/api/export_excel?';
+        if (keyword) url += `keyword=${encodeURIComponent(keyword)}&`;
+        if (source !== 'all') url += `source=${encodeURIComponent(source)}&`;
+        window.open(url, '_blank');
     }
 
-    // 绑定事件
+    // ===== 绑定事件 =====
     document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; loadDemands(1); });
     document.getElementById('resetBtn').addEventListener('click', () => {
         document.getElementById('keywordInput').value = '';
@@ -440,11 +463,15 @@
         if (e.key === 'Enter') { currentPage = 1; loadDemands(1); }
     });
 
-    // 初始化
-    loadSources();
+    // ============================================================
+    // ✅ 修改后的初始化：先加载来源，再加载需求
+    // ============================================================
+    // 先加载统计和推荐（不依赖来源列表）
     loadStats();
     loadRecommendations();
-    loadDemands(1);
+    // 加载来源（内部会调用 loadDemands(1)）
+    loadSources();
+    // 每5分钟刷新统计
     setInterval(loadStats, 300000);
 </script>
 </body>
