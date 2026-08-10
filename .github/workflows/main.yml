@@ -2,9 +2,8 @@ name: 数据需求定时抓取
 
 on:
   schedule:
-    # 工作日北京时间 10:00 运行（UTC 时间 2:00）
     - cron: '0 2 * * 1-5'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   crawl:
@@ -13,6 +12,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}  # ✅ 添加这行
 
       - name: 设置 Python
         uses: actions/setup-python@v5
@@ -32,10 +33,14 @@ jobs:
         run: |
           python -c "from crawler import ShangshuwangCrawler; c = ShangshuwangCrawler(); c.fetch_all(); c.close(); print('✅ 抓取完成')"
 
-      - name: 提交变更
+      - name: 配置 Git 认证  # ✅ 新增这个步骤
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
+      - name: 提交变更
+        run: |
           git add demands.db data_demands/ parsed_articles.txt 2>/dev/null || true
           git diff --staged --quiet || git commit -m "🤖 自动更新数据 $(date '+%Y-%m-%d %H:%M')"
           git push || echo "没有变更需要推送"
