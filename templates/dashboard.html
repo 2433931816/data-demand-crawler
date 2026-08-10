@@ -71,7 +71,6 @@
             color: #64748b;
         }
 
-        /* 重点推荐区域 */
         #recommendSection {
             margin-bottom: 16px;
         }
@@ -110,9 +109,11 @@
         #recommendSection .recommend-item .item-title {
             font-weight: 500;
             color: #1e293b;
+            flex: 1;
+            margin-right: 10px;
         }
         #recommendSection .recommend-item .item-source {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: #78350f;
             background: #fef3c7;
             padding: 0 10px;
@@ -207,6 +208,11 @@
             border-radius: 12px;
             font-size: 0.7rem;
             font-weight: 500;
+        }
+        .demand-item .desc-preview {
+            color: #475569;
+            font-size: 0.9rem;
+            margin-top: 4px;
         }
 
         .pagination {
@@ -303,33 +309,37 @@
         document.getElementById('lastUpdate').textContent = '⏱ 最后更新：' + new Date().toLocaleString('zh-CN');
     }
 
-    // ===== 加载来源列表（关键修复） =====
+    // ===== 加载来源列表 =====
     function loadSources() {
+        const select = document.getElementById('sourceSelect');
+        select.innerHTML = '<option value="all">全部数据源</option>';
+
+        // 硬编码北京公众号
+        const hardcodedSources = ['北京国际大数据交易所-公众号'];
+        hardcodedSources.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.text = s;
+            select.appendChild(opt);
+        });
+
         fetch('/api/dashboard')
             .then(r => r.json())
             .then(data => {
                 if (data.all_sources && data.all_sources.length > 0) {
-                    const select = document.getElementById('sourceSelect');
-                    // 保留第一个"全部数据源"选项
-                    select.innerHTML = '<option value="all">全部数据源</option>';
-                    // 按字母顺序排序，让查找更方便
-                    const sortedSources = data.all_sources.sort();
-                    sortedSources.forEach(s => {
+                    data.all_sources.forEach(s => {
+                        if (hardcodedSources.includes(s)) return;
                         const opt = document.createElement('option');
                         opt.value = s;
                         opt.text = s;
                         select.appendChild(opt);
                     });
-                    console.log('✅ 已加载来源列表，共 ' + sortedSources.length + ' 个来源');
-                } else {
-                    console.warn('⚠️ 未获取到来源列表');
+                    console.log('✅ 已加载来源列表');
                 }
-                // ✅ 来源加载完成后，再加载需求列表
                 loadDemands(1);
             })
             .catch(err => {
                 console.error('❌ 加载来源失败:', err);
-                // 即使加载失败，也尝试加载需求
                 loadDemands(1);
             });
     }
@@ -371,7 +381,7 @@
             });
     }
 
-    // ===== 加载需求列表 =====
+    // ===== 加载需求列表（不显示 category） =====
     function loadDemands(page) {
         const keyword = document.getElementById('keywordInput').value;
         const source = document.getElementById('sourceSelect').value;
@@ -396,6 +406,7 @@
                     return;
                 }
 
+                // ✅ 不显示 category
                 list.innerHTML = data.list.map(item => `
                     <div class="demand-item" onclick="location.href='/demand/${item.id}'">
                         <div class="title">${item.title}</div>
@@ -403,14 +414,12 @@
                             <span class="source-tag">${item.source}</span>
                             ${item.source_priority === 1 ? '<span class="priority-tag">⭐ 公众号</span>' : ''}
                             <span>📅 ${item.publish_date || item.created_at?.slice(0,10) || '未知'}</span>
-                            ${item.category ? `<span>📂 ${item.category}</span>` : ''}
                         </div>
-                        ${item.description ? `<div style="color:#475569;font-size:0.9rem;margin-top:4px;">${item.description.slice(0,150)}${item.description.length > 150 ? '...' : ''}</div>` : ''}
+                        ${item.description ? `<div class="desc-preview">${item.description.slice(0,150)}${item.description.length > 150 ? '...' : ''}</div>` : ''}
                     </div>
                 `).join('');
 
                 renderPagination(data);
-                // 刷新统计信息
                 loadStats();
             })
             .catch(err => {
@@ -443,7 +452,6 @@
     function exportExcel() {
         const keyword = document.getElementById('keywordInput').value;
         const source = document.getElementById('sourceSelect').value;
-        // 构建导出URL，包含当前筛选条件
         let url = '/api/export_excel?';
         if (keyword) url += `keyword=${encodeURIComponent(keyword)}&`;
         if (source !== 'all') url += `source=${encodeURIComponent(source)}&`;
@@ -463,15 +471,10 @@
         if (e.key === 'Enter') { currentPage = 1; loadDemands(1); }
     });
 
-    // ============================================================
-    // ✅ 修改后的初始化：先加载来源，再加载需求
-    // ============================================================
-    // 先加载统计和推荐（不依赖来源列表）
+    // ===== 初始化 =====
     loadStats();
     loadRecommendations();
-    // 加载来源（内部会调用 loadDemands(1)）
     loadSources();
-    // 每5分钟刷新统计
     setInterval(loadStats, 300000);
 </script>
 </body>
