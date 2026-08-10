@@ -1,0 +1,41 @@
+name: 数据需求定时抓取
+
+on:
+  schedule:
+    # 工作日北京时间 10:00 运行（UTC 时间 2:00）
+    - cron: '0 2 * * 1-5'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+
+      - name: 创建目录
+        run: |
+          mkdir -p data_demands
+          mkdir -p logs
+
+      - name: 运行爬虫
+        run: |
+          python -c "from crawler import ShangshuwangCrawler; c = ShangshuwangCrawler(); c.fetch_all(); c.close(); print('✅ 抓取完成')"
+
+      - name: 提交变更
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add demands.db data_demands/ parsed_articles.txt 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🤖 自动更新数据 $(date '+%Y-%m-%d %H:%M')"
+          git push || echo "没有变更需要推送"
