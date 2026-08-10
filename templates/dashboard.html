@@ -141,6 +141,8 @@
             border-radius: 8px;
             font-size: 0.9rem;
             background: #f8fafc;
+            flex: 1;
+            min-width: 150px;
         }
         .filters button {
             padding: 6px 16px;
@@ -202,12 +204,18 @@
             font-weight: 500;
         }
         .demand-item .priority-tag {
-            background: #fef3c7;
-            color: #b45309;
             padding: 0 10px;
             border-radius: 12px;
             font-size: 0.7rem;
             font-weight: 500;
+        }
+        .demand-item .priority-tag.wechat {
+            background: #fef3c7;
+            color: #b45309;
+        }
+        .demand-item .priority-tag.official {
+            background: #e0f2fe;
+            color: #0369a1;
         }
         .demand-item .desc-preview {
             color: #475569;
@@ -248,6 +256,7 @@
         @media (max-width: 768px) {
             .header { flex-direction: column; align-items: flex-start; gap: 10px; }
             .filters { flex-direction: column; align-items: stretch; }
+            .filters input, .filters select { flex: none; }
         }
     </style>
 </head>
@@ -286,8 +295,28 @@
 
     <!-- 筛选栏 -->
     <div class="filters">
-        <input type="text" id="keywordInput" placeholder="搜索需求标题..." style="flex:1;min-width:180px;">
-        <select id="sourceSelect"><option value="all">全部数据源</option></select>
+        <input type="text" id="keywordInput" placeholder="搜索标题或内容..." style="flex:1;min-width:180px;">
+        <select id="sourceSelect">
+            <option value="all">全部数据源</option>
+            <optgroup label="📱 公众号来源">
+                <option value="深圳数据交易所">深圳数据交易所</option>
+                <option value="北京国际大数据交易所-公众号">北京国际大数据交易所-公众号</option>
+            </optgroup>
+            <optgroup label="🌐 官网/API 来源">
+                <option value="尚数网">尚数网</option>
+                <option value="北京国际大数据交易所">北京国际大数据交易所</option>
+                <option value="上海数据交易所">上海数据交易所</option>
+                <option value="广州数据交易所">广州数据交易所</option>
+                <option value="杭州数据交易所">杭州数据交易所</option>
+                <option value="山东数据交易平台">山东数据交易平台</option>
+                <option value="湖南大数据交易所">湖南大数据交易所</option>
+                <option value="郑州数据交易中心">郑州数据交易中心</option>
+                <option value="华东江苏大数据交易中心">华东江苏大数据交易中心</option>
+                <option value="安徽省数据交易所">安徽省数据交易所</option>
+                <option value="北部湾大数据交易中心">北部湾大数据交易中心</option>
+                <option value="浙江大数据交易服务平台">浙江大数据交易服务平台</option>
+            </optgroup>
+        </select>
         <button id="searchBtn">🔍 搜索</button>
         <button class="btn-reset" id="resetBtn">重置</button>
         <button class="btn-success" id="exportExcelBtn">📊 导出 Excel</button>
@@ -309,39 +338,10 @@
         document.getElementById('lastUpdate').textContent = '⏱ 最后更新：' + new Date().toLocaleString('zh-CN');
     }
 
-    // ===== 加载来源列表 =====
+    // ===== 加载来源（下拉框已硬编码分组，直接加载需求） =====
     function loadSources() {
-        const select = document.getElementById('sourceSelect');
-        select.innerHTML = '<option value="all">全部数据源</option>';
-
-        // 硬编码北京公众号
-        const hardcodedSources = ['北京国际大数据交易所-公众号'];
-        hardcodedSources.forEach(s => {
-            const opt = document.createElement('option');
-            opt.value = s;
-            opt.text = s;
-            select.appendChild(opt);
-        });
-
-        fetch('/api/dashboard')
-            .then(r => r.json())
-            .then(data => {
-                if (data.all_sources && data.all_sources.length > 0) {
-                    data.all_sources.forEach(s => {
-                        if (hardcodedSources.includes(s)) return;
-                        const opt = document.createElement('option');
-                        opt.value = s;
-                        opt.text = s;
-                        select.appendChild(opt);
-                    });
-                    console.log('✅ 已加载来源列表');
-                }
-                loadDemands(1);
-            })
-            .catch(err => {
-                console.error('❌ 加载来源失败:', err);
-                loadDemands(1);
-            });
+        // 下拉框已在 HTML 中硬编码分组，无需动态加载
+        loadDemands(1);
     }
 
     // ===== 加载统计信息 =====
@@ -366,12 +366,17 @@
             .then(res => {
                 const list = document.getElementById('recommendList');
                 if (res.code === 0 && res.data.list.length > 0) {
-                    list.innerHTML = res.data.list.map(item => `
+                    list.innerHTML = res.data.list.map(item => {
+                        const isWechat = item.source_priority === 1;
+                        return `
                         <div class="recommend-item" onclick="location.href='/demand/${item.id}'">
                             <span class="item-title">${item.title}</span>
                             <span class="item-source">${item.source}</span>
+                            <span style="font-size:0.65rem;background:${isWechat ? '#fef3c7' : '#e0f2fe'};color:${isWechat ? '#b45309' : '#0369a1'};padding:0 8px;border-radius:10px;white-space:nowrap;margin-left:6px;">
+                                ${isWechat ? '⭐ 公众号' : '🌐 官网'}
+                            </span>
                         </div>
-                    `).join('');
+                    `}).join('');
                 } else {
                     list.innerHTML = '<div style="color:#78350f;font-size:0.9rem;">暂无重点推荐需求</div>';
                 }
@@ -381,11 +386,11 @@
             });
     }
 
-    // ===== 加载需求列表（不显示 category） =====
+    // ===== 加载需求列表 =====
     function loadDemands(page) {
         const keyword = document.getElementById('keywordInput').value;
         const source = document.getElementById('sourceSelect').value;
-        const url = `/api/demands?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(keyword)}&source=${source}&sort_by=source_priority&sort_order=asc`;
+        const url = `/api/demands?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(keyword)}&source=${source}&sort_by=publish_date&sort_order=desc`;
 
         document.getElementById('demandList').innerHTML = '<div class="loading">加载中...</div>';
 
@@ -406,18 +411,21 @@
                     return;
                 }
 
-                // ✅ 不显示 category
-                list.innerHTML = data.list.map(item => `
+                list.innerHTML = data.list.map(item => {
+                    const isWechat = item.source_priority === 1;
+                    const tagClass = isWechat ? 'wechat' : 'official';
+                    const tagText = isWechat ? '⭐ 公众号' : '🌐 官网';
+                    return `
                     <div class="demand-item" onclick="location.href='/demand/${item.id}'">
                         <div class="title">${item.title}</div>
                         <div class="meta">
                             <span class="source-tag">${item.source}</span>
-                            ${item.source_priority === 1 ? '<span class="priority-tag">⭐ 公众号</span>' : ''}
+                            <span class="priority-tag ${tagClass}">${tagText}</span>
                             <span>📅 ${item.publish_date || item.created_at?.slice(0,10) || '未知'}</span>
                         </div>
                         ${item.description ? `<div class="desc-preview">${item.description.slice(0,150)}${item.description.length > 150 ? '...' : ''}</div>` : ''}
                     </div>
-                `).join('');
+                `}).join('');
 
                 renderPagination(data);
                 loadStats();

@@ -554,16 +554,9 @@ class ShangshuwangCrawler:
             f.write(url + '\n')
 
     def fetch_shenzhen(self) -> List[Dict]:
-        """
-        抓取深圳数据交易所公众号发布的需求列表
-        支持多种需求格式：01/02、采购需求1/2、需求一/二
-        """
         all_demands = []
 
-        # 加载已解析的文章链接
         parsed_urls = self._load_parsed_article()
-
-        # 从配置读取文章链接
         article_urls = self.shenzhen_article_urls
         print(f"article_urls: {article_urls}")
         if not article_urls:
@@ -575,7 +568,6 @@ class ShangshuwangCrawler:
         }
 
         for url in article_urls:
-            # 检查是否已解析
             if url in parsed_urls:
                 logger.info(f"跳过已解析文章: {url}")
                 continue
@@ -587,17 +579,43 @@ class ShangshuwangCrawler:
                     continue
 
                 soup = BeautifulSoup(response.text, 'html.parser')
-                content = soup.find('div', class_='rich_media_content')
 
+                # ===== ✅ 提前初始化 publish_date =====
+                publish_date = ''
+
+                content = soup.find('div', class_='rich_media_content')
                 if not content:
                     continue
 
+                # ===== 提取发布时间 =====
+                time_tag = soup.find('em', class_='publish_time')
+                if time_tag:
+                    publish_date = time_tag.text.strip()
+                else:
+                    meta_tag = soup.find('meta', {'property': 'article:published_time'})
+                    if meta_tag:
+                        publish_date = meta_tag.get('content', '')[:10]
+                    else:
+                        time_span = soup.find('span', class_='rich_media_meta_text')
+                        if time_span:
+                            publish_date = time_span.text.strip()
+
                 clean_text = content.get_text(separator='\n', strip=True)
+
+                # 如果上面没提取到，从文本中提取日期
+                if not publish_date:
+                    import re
+                    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', clean_text)
+                    if date_match:
+                        publish_date = date_match.group(1)
+
+                logger.info(f"发布时间: {publish_date}")
 
                 if len(clean_text) < 50:
                     continue
 
                 text = clean_text
+                # ... 后续解析逻辑 ...
                 logger.info(f"文章总长度: {len(text)} 字符")
 
                 import re
@@ -759,7 +777,7 @@ class ShangshuwangCrawler:
                             'title': title,
                             'description': final_desc[:800] if final_desc else '',
                             'detailed_requirements': detailed_req[:500] if detailed_req else '',
-                            'publish_date': '',
+                            'publish_date': publish_date,
                             'url': url,
                             'category': product_type,
                             'source_priority': 1,
@@ -814,11 +832,36 @@ class ShangshuwangCrawler:
                     continue
 
                 soup = BeautifulSoup(response.text, 'html.parser')
-                content = soup.find('div', class_='rich_media_content')
 
+                # ===== ✅ 提前初始化 publish_date =====
+                publish_date = ''
+
+                content = soup.find('div', class_='rich_media_content')
                 if not content:
                     continue
 
+                # ===== 提取发布时间 =====
+                time_tag = soup.find('em', class_='publish_time')
+                if time_tag:
+                    publish_date = time_tag.text.strip()
+                else:
+                    meta_tag = soup.find('meta', {'property': 'article:published_time'})
+                    if meta_tag:
+                        publish_date = meta_tag.get('content', '')[:10]
+                    else:
+                        time_span = soup.find('span', class_='rich_media_meta_text')
+                        if time_span:
+                            publish_date = time_span.text.strip()
+
+                clean_text = content.get_text(separator='\n', strip=True)
+
+                if not publish_date:
+                    import re
+                    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', clean_text)
+                    if date_match:
+                        publish_date = date_match.group(1)
+
+                logger.info(f"发布时间: {publish_date}")
                 clean_text = content.get_text(separator='\n', strip=True)
 
                 if len(clean_text) < 50:
@@ -939,7 +982,7 @@ class ShangshuwangCrawler:
                         'title': title[:80] if len(title) > 80 else title,
                         'description': description[:500],
                         'detailed_requirements': detailed_req,
-                        'publish_date': '',
+                        'publish_date': publish_date,
                         'url': url,
                         'category': '征集通知',
                         'phone': phone,

@@ -242,12 +242,13 @@ def api_demands():
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
-    # 构建排序
-    if sort_by == 'source_priority':
-        order_clause = "ORDER BY source_priority ASC, publish_date DESC"
-    else:
-        order_clause = f"ORDER BY publish_date {sort_order}"
-
+    # ✅ 按发布时间倒序排序（最新在前）
+    order_clause = """
+        ORDER BY 
+            CASE WHEN publish_date = '' OR publish_date IS NULL THEN 1 ELSE 0 END,
+            publish_date DESC,
+            created_at DESC
+    """
     # 查询总数
     count_sql = f"SELECT COUNT(*) FROM demands WHERE {where_sql}"
     cursor.execute(count_sql, params)
